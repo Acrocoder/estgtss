@@ -35,7 +35,7 @@ npm run build
 npm run preview
 ```
 
-`npm run preview` is for local production-build checks; it is not a public host. This project has no hosting provider or public domain configured yet. Configure the chosen host to publish `dist/` at its site root; if deploying under a subpath, update the Vite base path, manifest `start_url`/`scope`, and service-worker paths together.
+`npm run preview` is for local production-build checks; it is not a public host. Configure the chosen frontend host to publish `dist/` at its site root; if deploying under a subpath, update the Vite base path, manifest `start_url`/`scope`, and service-worker paths together.
 
 If the host requires SPA rewrites, send frontend navigation requests to `index.html`. When the API shares the same domain, route `/api/*` to Express before applying that fallback so API responses are never replaced by the frontend shell.
 
@@ -53,7 +53,7 @@ The first server start creates the schema, seeds the currently configured level/
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Existing database and application credentials |
 | `JWT_SECRET` | Random secret of at least 32 characters used to sign 12-hour access tokens |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Optional first-run bootstrap administrator |
-| `VITE_API_URL` | API base URL for the frontend (default `http://localhost:4000/api`) |
+| `VITE_API_URL` | API base URL for the frontend (default `https://estgtss-api.onrender.com/api`) |
 
 `server/server.js` contains the idempotent schema bootstrap. Back up the MySQL database regularly and use TLS and restricted database/network access for deployment. This local starter does not configure automated backups or production hosting.
 
