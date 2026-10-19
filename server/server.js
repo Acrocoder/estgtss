@@ -203,6 +203,10 @@ async function initializeDatabase() {
         process.env.ADMIN_USERNAME, process.env.ADMIN_NAME, passwordHash, 'Administrator',
       ])
       console.info(`Created initial administrator account "${process.env.ADMIN_USERNAME}".`)
+    } else if (process.env.RESET_ADMIN_PASSWORD === 'true') {
+      const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
+      await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existing[0].id])
+      console.info(`Reset the password for administrator account "${process.env.ADMIN_USERNAME}".`)
     }
   }
 }

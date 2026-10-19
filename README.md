@@ -41,7 +41,7 @@ If the host requires SPA rewrites, send frontend navigation requests to `index.h
 
 On Android, visit the HTTPS site in Chrome and choose **Install ETG TSS App** when offered. On iPhone/iPad, open the HTTPS site in Safari, tap **Share**, then **Add to Home Screen**. Launch the new icon; the browser address bar is hidden when `display-mode: standalone` is active.
 
-The first server start creates the schema, seeds the currently configured level/trade/class combinations, and creates the initial administrator if that username does not already exist. The initial administrator password is hashed with bcrypt. The requested bootstrap account uses `estgpatron@gmail.com` as its login and the password configured in the local `.env`; the bootstrap password must be at least 8 characters. This bootstrap-only minimum is weaker than the 12-character requirement for subsequently created accounts, so change it before production use. After first startup, remove the bootstrap `ADMIN_PASSWORD` and `ADMIN_NAME` values from the environment; create further accounts through the authenticated admin user API.
+The first server start creates the schema, seeds the currently configured level/trade/class combinations, and creates the initial administrator if that username does not already exist. The initial administrator password is hashed with bcrypt. The bootstrap account uses the configured `ADMIN_USERNAME` and `ADMIN_PASSWORD`; the bootstrap password must be at least 8 characters. This bootstrap-only minimum is weaker than the 12-character requirement for subsequently created accounts, so use a strong password before production. If you need to reset an existing bootstrap administrator's password, set `RESET_ADMIN_PASSWORD=true` alongside `ADMIN_USERNAME` and the new `ADMIN_PASSWORD`, deploy/restart the API once, then remove `RESET_ADMIN_PASSWORD` from the environment. After first startup, remove the bootstrap `ADMIN_PASSWORD` and `ADMIN_NAME` values from the environment; create further accounts through the authenticated admin user API.
 
 ## Configuration
 
@@ -53,6 +53,7 @@ The first server start creates the schema, seeds the currently configured level/
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Existing database and application credentials |
 | `JWT_SECRET` | Random secret of at least 32 characters used to sign 12-hour access tokens |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Optional first-run bootstrap administrator |
+| `RESET_ADMIN_PASSWORD` | Set to `true` temporarily to reset the configured bootstrap administrator's password at startup |
 | `VITE_API_URL` | API base URL for the frontend (default `https://estgtss-api.onrender.com/api`) |
 
 `server/server.js` contains the idempotent schema bootstrap. Back up the MySQL database regularly and use TLS and restricted database/network access for deployment. This local starter does not configure automated backups or production hosting.
