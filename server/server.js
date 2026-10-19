@@ -195,14 +195,19 @@ async function initializeDatabase() {
   for (const [level, trade, className] of classStructure) {
     await pool.execute('INSERT IGNORE INTO classes (level, trade, class_name) VALUES (?, ?, ?)', [level, trade, className])
   }
-  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD && process.env.ADMIN_NAME) {
+  if (process.env.RESET_ADMIN_PASSWORD === 'true' && (!process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD)) {
+    throw new Error('ADMIN_USERNAME and ADMIN_PASSWORD must be set to reset the administrator password.')
+  }
+  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
     const [existing] = await pool.execute('SELECT id FROM users WHERE username = ?', [process.env.ADMIN_USERNAME])
-    if (!existing.length) {
+    if (!existing.length && process.env.ADMIN_NAME) {
       const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
       await pool.execute('INSERT INTO users (username, name, password_hash, role) VALUES (?, ?, ?, ?)', [
         process.env.ADMIN_USERNAME, process.env.ADMIN_NAME, passwordHash, 'Administrator',
       ])
       console.info(`Created initial administrator account "${process.env.ADMIN_USERNAME}".`)
+    } else if (!existing.length) {
+      throw new Error('ADMIN_NAME must be set when creating the initial administrator account.')
     } else if (process.env.RESET_ADMIN_PASSWORD === 'true') {
       const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
       await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existing[0].id])
