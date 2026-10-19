@@ -11,7 +11,7 @@ import {
 } from 'recharts'
 import './App.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
+const API_URL = import.meta.env.VITE_API_URL || 'https://estgtss-api.onrender.com/api'
 const levels = ['Level 3', 'Level 4', 'Level 5']
 const trades = ['SOD', 'ELET']
 const navItems = [
