@@ -21,6 +21,8 @@ const navItems = [
   { label: 'Permissions', icon: ShieldCheck },
   { label: 'Behaviour', icon: Activity },
   { label: 'Reports', icon: FileBarChart2 },
+  { label: 'Daily Reports', icon: BookOpen },
+  { label: 'Reports Inbox', icon: Bell },
 ]
 const todayDate = new Date()
 const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
@@ -83,6 +85,7 @@ function App() {
   const [permissions, setPermissions] = useState([])
   const [behaviour, setBehaviour] = useState([])
   const [dashboard, setDashboard] = useState(null)
+  const [reportsData, setReportsData] = useState({ reports: [], attendance: [], messages: [] })
   const [search, setSearch] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [notice, setNotice] = useState('')
@@ -94,14 +97,16 @@ function App() {
     if (!token) return
     setBusy(true)
     try {
-      const [me, studentData, classData, attendanceData, permissionData, behaviourData, summary] = await Promise.all([
-        request('/auth/me', { token }),
+      const me = await request('/auth/me', { token })
+      const role = me.user.role
+      const [studentData, classData, attendanceData, permissionData, behaviourData, summary, reportData] = await Promise.all([
         request('/students', { token }),
         request('/classes', { token }),
         request(`/attendance?date=${today}`, { token }),
         request('/permissions', { token }),
         request('/behaviour', { token }),
-        request(`/dashboard?date=${today}`, { token }),
+        ['Class Monitor', 'Teacher'].includes(role) ? Promise.resolve(null) : request(`/dashboard?date=${today}`, { token }),
+        request('/reports', { token }),
       ])
       setUser(me.user)
       setStudents(studentData.students)
@@ -110,6 +115,7 @@ function App() {
       setPermissions(permissionData.permissions)
       setBehaviour(behaviourData.records)
       setDashboard(summary)
+      setReportsData(reportData)
       setError('')
     } catch (requestError) {
       if (requestError.message.toLowerCase().includes('token') ||
@@ -140,6 +146,18 @@ function App() {
       `${student.full_name} ${student.student_number} ${student.level} ${student.trade} ${student.class_name}`.toLowerCase().includes(query),
     ) : students
   }, [search, students])
+  const visibleNavItems = navItems.filter(({ label }) => {
+    if (['Class Monitor', 'Teacher'].includes(user?.role)) {
+      return ['Attendance', 'Daily Reports'].includes(label) && (label !== 'Attendance' || user?.role === 'Class Monitor')
+    }
+    if (user?.role === 'Administrator') return label !== 'Daily Reports'
+    return !['Daily Reports', 'Reports Inbox'].includes(label)
+  })
+  const activePage = page === 'Overview' && user?.role === 'Class Monitor'
+    ? 'Attendance'
+    : page === 'Overview' && user?.role === 'Teacher'
+      ? 'Daily Reports'
+      : page
 
   async function mutate(path, method, body, success) {
     try {
@@ -170,8 +188,8 @@ function App() {
         </a>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {navItems.map(({ label, icon: Icon }) => (
-            <button key={label} className={`nav-link ${page === label ? 'active' : ''}`} onClick={() => { setPage(label); setMenuOpen(false) }}>
+          {visibleNavItems.map(({ label, icon: Icon }) => (
+            <button key={label} className={`nav-link ${activePage === label ? 'active' : ''}`} onClick={() => { setPage(label); setMenuOpen(false) }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
               {label === 'Permissions' && permissions.filter((item) => item.status === 'Pending').length > 0 &&
                 <span className="nav-count">{permissions.filter((item) => item.status === 'Pending').length}</span>}
@@ -191,7 +209,7 @@ function App() {
         {menuOpen && <button className="mobile-nav-backdrop" aria-label="Close navigation menu" onClick={() => setMenuOpen(false)} />}
         <header className="topbar">
           <button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button>
-          <div className="breadcrumb">ESTG TSS <ChevronRight size={15} /> <strong>{page}</strong></div>
+          <div className="breadcrumb">ESTG TSS <ChevronRight size={15} /> <strong>{activePage}</strong></div>
           <div className="top-actions">
             <div className="global-search-wrap"><label className="global-search"><Search size={17} /><input placeholder="Search students..." value={search} onChange={(event) => setSearch(event.target.value)} /></label>{search.trim() && <div className="global-results" role="listbox">{filteredStudents.slice(0, 6).map((student) => <button key={student.id} role="option" onClick={() => { setSelectedStudentId(student.id); setSearch('') }}><span className="avatar">{student.full_name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{student.full_name}</strong><small>{student.student_number} · {student.level} · {student.trade} {student.class_name}</small></span></button>)}{!filteredStudents.length && <p>No matching students.</p>}</div>}</div>
             <button className="icon-button notification-button" aria-label="Notifications"><Bell size={18} /><i /></button>
@@ -202,13 +220,15 @@ function App() {
           {error && <div className="toast error-toast" role="alert"><XCircle size={18} />{error}<button onClick={() => setError('')}><X size={16} /></button></div>}
           {notice && <div className="toast success-toast" role="status"><Check size={18} />{notice}<button onClick={() => setNotice('')}><X size={16} /></button></div>}
           {busy && <div className="loading-line" />}
-          {page === 'Overview' && <Dashboard dashboard={dashboard} students={students} attendance={attendance} permissions={permissions} behaviour={behaviour} setPage={setPage} />}
-          {page === 'Students' && <StudentsPage students={filteredStudents} classes={schoolClasses} onOpenProfile={setSelectedStudentId} readOnly={user?.role === 'Read-only Staff'} onCreate={(body) => mutate('/students', 'POST', body, 'Student registered successfully.')} onUpdate={(id, body) => mutate(`/students/${id}`, 'PATCH', body, 'Student details updated.')} />}
-          {page === 'Attendance' && <AttendancePage token={token} students={students} classes={schoolClasses} permissions={permissions} readOnly={user?.role === 'Read-only Staff'} onSaved={refresh} notify={setNotice} reportError={setError} />}
-          {page === 'Permissions' && <PermissionsPage token={token} students={students} classes={schoolClasses} permissions={permissions} onRefresh={refresh} notify={setNotice} reportError={setError} user={user} />}
-          {page === 'Behaviour' && <BehaviourPage students={students} records={behaviour} onCreate={(body) => mutate('/behaviour', 'POST', body, 'Behaviour record saved.')} readOnly={user?.role === 'Read-only Staff'} />}
-          {page === 'Reports' && <ReportsPage token={token} students={students} classes={schoolClasses} attendance={attendance} permissions={permissions} behaviour={behaviour} />}
-          {page === 'Settings' && <SettingsPage token={token} user={user} classes={schoolClasses} onCreateClass={(body) => mutate('/classes', 'POST', body, 'School class added.')} reportError={setError} notify={setNotice} />}
+          {activePage === 'Overview' && <Dashboard dashboard={dashboard} students={students} attendance={attendance} permissions={permissions} behaviour={behaviour} setPage={setPage} />}
+          {activePage === 'Students' && <StudentsPage students={filteredStudents} classes={schoolClasses} onOpenProfile={setSelectedStudentId} readOnly={user?.role === 'Read-only Staff'} onCreate={(body) => mutate('/students', 'POST', body, 'Student registered successfully.')} onUpdate={(id, body) => mutate(`/students/${id}`, 'PATCH', body, 'Student details updated.')} />}
+          {activePage === 'Attendance' && <AttendancePage token={token} students={students} classes={schoolClasses} permissions={permissions} readOnly={user?.role === 'Read-only Staff'} user={user} onSaved={refresh} notify={setNotice} reportError={setError} />}
+          {activePage === 'Permissions' && <PermissionsPage token={token} students={students} classes={schoolClasses} permissions={permissions} onRefresh={refresh} notify={setNotice} reportError={setError} user={user} />}
+          {activePage === 'Behaviour' && <BehaviourPage students={students} records={behaviour} onCreate={(body) => mutate('/behaviour', 'POST', body, 'Behaviour record saved.')} readOnly={user?.role === 'Read-only Staff'} />}
+          {activePage === 'Reports' && <ReportsPage token={token} students={students} classes={schoolClasses} attendance={attendance} permissions={permissions} behaviour={behaviour} />}
+          {activePage === 'Daily Reports' && <DailyReportsPage token={token} classes={schoolClasses} students={students} user={user} reports={reportsData.reports} onRefresh={refresh} notify={setNotice} reportError={setError} />}
+          {activePage === 'Reports Inbox' && <ReportsInboxPage token={token} data={reportsData} onRefresh={refresh} reportError={setError} notify={setNotice} />}
+          {activePage === 'Settings' && <SettingsPage token={token} user={user} classes={schoolClasses} onCreateClass={(body) => mutate('/classes', 'POST', body, 'School class added.')} reportError={setError} notify={setNotice} />}
         </div>
       </main>
       {selectedStudentId && <StudentProfile token={token} studentId={selectedStudentId} onClose={() => setSelectedStudentId(null)} />}
@@ -217,17 +237,47 @@ function App() {
 }
 
 function Login({ onLogin }) {
+  const [mode, setMode] = useState('login')
   const [username, setUsername] = useState('')
+  const [name, setName] = useState('')
   const [password, setPassword] = useState('')
+  const [role, setRole] = useState('Class Monitor')
+  const [classes, setClasses] = useState([])
+  const [classId, setClassId] = useState('')
+  const [classMistressName, setClassMistressName] = useState('')
+  const [subject, setSubject] = useState('')
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    request('/public/classes')
+      .then((data) => setClasses(data.classes))
+      .catch((requestError) => setError(requestError.message))
+  }, [])
   async function submit(event) {
     event.preventDefault()
     setLoading(true)
     setError('')
+    setSuccess('')
     try {
-      const result = await request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
-      onLogin(result.token)
+      if (mode === 'login') {
+        const result = await request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+        onLogin(result.token)
+      } else {
+        const selectedClass = classes.find((item) => String(item.id) === classId)
+        if (!selectedClass) throw new Error('Select your level, trade, and class.')
+        const result = await request('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            username, name, password, role, level: selectedClass.level,
+            trade: selectedClass.trade, className: selectedClass.class_name,
+            classMistressName, subject,
+          }),
+        })
+        setSuccess(result.message)
+        setMode('login')
+        setPassword('')
+      }
     } catch (loginError) {
       setError(loginError.message)
     } finally {
@@ -239,15 +289,26 @@ function Login({ onLogin }) {
       <div className="login-card">
         <div className="login-logo"><GraduationCap size={27} /></div>
         <p className="eyebrow">ESTG TSS · SCHOOL PATRON</p>
-        <h1>Welcome back</h1>
-        <p className="login-subtitle">Sign in to manage your school community.</p>
+        <h1>{mode === 'login' ? 'Welcome back' : 'Request a staff account'}</h1>
+        <p className="login-subtitle">{mode === 'login' ? 'Sign in to manage your school community.' : 'New accounts need administrator approval before sign-in.'}</p>
         {error && <div className="form-error" role="alert">{error}</div>}
+        {success && <div className="registration-success" role="status">{success}</div>}
         <form onSubmit={submit}>
+          {mode === 'register' && <>
+            <label>Full name<input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
+            <label>Account type<select value={role} onChange={(event) => setRole(event.target.value)}><option>Class Monitor</option><option>Teacher</option></select></label>
+          </>}
           <label>Email / username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Email or username" /></label>
-          <label>Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label>
-          <button className="primary-button full-button" disabled={loading}>{loading ? 'Signing in...' : 'Sign in'}<ArrowUpRight size={17} /></button>
+          {mode === 'register' && <>
+            <label>Level, trade, and class<select required value={classId} onChange={(event) => setClassId(event.target.value)}><option value="">Select your class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.level} · {item.trade} · {item.class_name}</option>)}</select></label>
+            {role === 'Class Monitor' && <label>Class mistress name<input required value={classMistressName} onChange={(event) => setClassMistressName(event.target.value)} /></label>}
+            {role === 'Teacher' && <label>Subject taught<input required value={subject} onChange={(event) => setSubject(event.target.value)} /></label>}
+          </>}
+          <label>Password<input required minLength={mode === 'register' ? 12 : undefined} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === 'login' ? 'Enter your password' : 'At least 12 characters'} /></label>
+          <button className="primary-button full-button" disabled={loading}>{loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Send approval request'}<ArrowUpRight size={17} /></button>
         </form>
-        <p className="login-footnote">Use the administrator account configured for this installation.</p>
+        <button className="text-button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setSuccess('') }}>{mode === 'login' ? 'Teacher or class monitor? Request an account' : 'Already have an account? Sign in'}</button>
+        {mode === 'login' && <p className="login-footnote">Use the administrator account configured for this installation.</p>}
       </div>
       <div className="login-decoration"><span>01 / SCHOOL LIFE</span><strong>Every student<br />seen. Every day.</strong><p>A calmer way to keep track of the moments that matter.</p><div className="decoration-line" /></div>
     </main>
@@ -382,8 +443,15 @@ function StudentsPage({ students, classes, readOnly, onOpenProfile, onCreate, on
   </>
 }
 
-function AttendancePage({ token, students, classes, permissions, readOnly, onSaved, notify, reportError }) {
-  const [filters, setFilters] = useState({ date: today, level: '', trade: '', className: '' })
+function AttendancePage({ token, students, classes, permissions, readOnly, user, onSaved, notify, reportError }) {
+  const [filters, setFilters] = useState(() => ({
+    date: today,
+    level: user?.role === 'Class Monitor' ? classes[0]?.level || '' : '',
+    trade: user?.role === 'Class Monitor' ? classes[0]?.trade || '' : '',
+    className: user?.role === 'Class Monitor' ? classes[0]?.class_name || '' : '',
+  }))
+  const [attendedBy, setAttendedBy] = useState(user?.role === 'Class Monitor' ? 'Class Monitor' : 'Staff')
+  const submitToAdmin = user?.role === 'Class Monitor'
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -433,9 +501,9 @@ function AttendancePage({ token, students, classes, permissions, readOnly, onSav
   async function save() {
     setSaving(true)
     try {
-      const saved = await request('/attendance', { token, method: 'POST', body: JSON.stringify({ date: filters.date, level: filters.level, trade: filters.trade, className: filters.className, reason: correctionReason, records: rows.map(({ id, status }) => ({ studentId: id, status })) }) })
-      setSessionInfo({ date: filters.date, saved_at: saved.savedAt, saved_by: saved.savedBy, attendanceKey })
-      notify('Attendance saved. Students not yet called remain Not Marked.')
+      const saved = await request('/attendance', { token, method: 'POST', body: JSON.stringify({ date: filters.date, level: filters.level, trade: filters.trade, className: filters.className, reason: correctionReason, attendedBy, submitToAdmin, records: rows.map(({ id, status }) => ({ studentId: id, status })) }) })
+      setSessionInfo({ date: filters.date, saved_at: saved.savedAt, saved_by: saved.savedBy, attended_by: attendedBy, submitted_to_admin: submitToAdmin, attendanceKey })
+      notify(submitToAdmin ? 'Attendance saved and sent to the administrator.' : 'Attendance saved. Students not yet called remain Not Marked.')
       setCorrectionReason('')
       await onSaved()
     } catch (error) {
@@ -455,15 +523,17 @@ function AttendancePage({ token, students, classes, permissions, readOnly, onSav
     <PageHeading eyebrow="DAILY ROLL CALL" title="Attendance" description="Call names, mark each student, and save the class register." action={<button className="secondary-button" onClick={() => window.print()}><Download size={16} />Print register</button>} />
     <section className="panel attendance-filters">
       <label>Date<input type="date" value={filters.date} onChange={(event) => setFilters({ ...filters, date: event.target.value })} /></label>
-      <ClassFields values={filters} onChange={(next) => setFilters({ ...next, date: filters.date })} classes={classes} />
+      {user?.role === 'Class Monitor'
+        ? <div className="field-grid three"><label>Level<input readOnly value={classes[0]?.level || ''} /></label><label>Trade<input readOnly value={classes[0]?.trade || ''} /></label><label>Class<input readOnly value={classes[0]?.class_name || ''} /></label></div>
+        : <ClassFields values={filters} onChange={(next) => setFilters({ ...next, date: filters.date })} classes={classes} />}
       <div className="attendance-totals">{counts.map(({ status, count }) => <div key={status}><span className={`status-dot ${status.toLowerCase().replaceAll(' ', '-')}`} />{status}<strong>{count}</strong></div>)}</div>
     </section>
     {!filters.className ? <section className="panel attendance-empty"><div className="empty-icon"><ClipboardCheck size={24} /></div><h2>Choose a class to begin</h2><p>Select a level, trade, and class to load its active student register.</p></section>
       : <div className="attendance-layout"><section className="panel rollcall-panel">
-        <div className={`attendance-save-status ${currentSessionInfo ? 'saved' : 'not-saved'}`} role="status"><strong>{currentSessionInfo ? `Attendance recorded for ${attendanceDateLabel}.` : noAttendanceMessage}</strong>{currentSessionInfo ? <span>Saved by {currentSessionInfo.saved_by} at {formatDateTime(currentSessionInfo.saved_at)}.</span> : !hasAttendanceMark && !readOnly && <span>Mark students Present, Absent, Late, or Authorized Away to start the register.</span>}</div>
+        <div className={`attendance-save-status ${currentSessionInfo ? 'saved' : 'not-saved'}`} role="status"><strong>{currentSessionInfo ? `Attendance recorded for ${attendanceDateLabel}.` : noAttendanceMessage}</strong>{currentSessionInfo ? <span>Saved by {currentSessionInfo.saved_by} · marked by {currentSessionInfo.attended_by || 'Staff'}{currentSessionInfo.submitted_to_admin ? ' · sent to administrator' : ''} at {formatDateTime(currentSessionInfo.saved_at)}.</span> : !hasAttendanceMark && !readOnly && <span>Mark students Present, Absent, Late, or Authorized Away to start the register.</span>}</div>
         {loading ? <EmptyState message="Loading class register..." /> : <div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>STUDENT ID</th><th>ATTENDANCE</th><th>MARK</th></tr></thead><tbody>{rows.map((student, index) => <tr key={student.id} className={active === index ? 'current-student' : ''}><td><button className="student-name-button" onClick={() => setActive(index)}><span className={`avatar avatar-color-${index % 4}`}>{student.full_name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span>{student.full_name}</button></td><td className="muted-cell">{student.student_number}</td><td><StatusBadge status={student.status} /></td><td><div className="attendance-buttons"><button disabled={readOnly} title="Mark present" aria-label={`Mark ${student.full_name} present`} className={student.status === 'Present' ? 'selected-present' : ''} onClick={() => { setStatus(student.id, 'Present'); setActive(index) }}><Check size={16} /></button><button disabled={readOnly} title="Mark absent" aria-label={`Mark ${student.full_name} absent`} className={student.status === 'Absent' ? 'selected-absent' : ''} onClick={() => { setStatus(student.id, 'Absent'); setActive(index) }}><X size={16} /></button><button disabled={readOnly} title="Mark late" aria-label={`Mark ${student.full_name} late`} className={student.status === 'Late' ? 'selected-late' : ''} onClick={() => { setStatus(student.id, 'Late'); setActive(index) }}><Clock3 size={15} /></button><button disabled={readOnly} title="Authorized away" aria-label={`Mark ${student.full_name} authorized away`} className={student.status === 'Authorized Away' ? 'selected-away' : ''} onClick={() => { setStatus(student.id, 'Authorized Away'); setActive(index) }}><ArrowUpRight size={15} /></button></div></td></tr>)}</tbody></table></div>}
         {!rows.length && !loading && <EmptyState message={allClassStudents.length ? 'No internal boarding students are registered in this class. External students and day scholars are excluded from attendance.' : 'No active students are registered in this class yet.'} />}
-        <div className="rollcall-footer"><div className="rollcall-footer-note"><span>{rows.filter((row) => row.status === 'Not Marked').length} students not yet marked</span>{!readOnly && <input aria-label="Reason for attendance correction" placeholder="Correction reason (if changing saved marks)" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} />}</div><div><button className="secondary-button" disabled={!rows.length || active >= rows.length - 1} onClick={() => setActive((index) => Math.min(index + 1, rows.length - 1))}>Next student <ChevronRight size={16} /></button>{!readOnly && <button className="primary-button" disabled={saving || loading || !hasAttendanceMark} onClick={save}>{saving ? 'Saving...' : 'Save attendance'}<Check size={16} /></button>}</div></div>
+        <div className="rollcall-footer"><div className="rollcall-footer-note"><span>{rows.filter((row) => row.status === 'Not Marked').length} students not yet marked</span>{!readOnly && <input aria-label="Reason for attendance correction" placeholder="Correction reason (if changing saved marks)" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} />}</div><div className="attendance-submit-controls"><label>Attendance taken by<select value={attendedBy} onChange={(event) => setAttendedBy(event.target.value)}>{(user?.role === 'Class Monitor' ? ['Class Monitor', 'Class Mistress'] : ['Staff', 'Teacher', 'Class Monitor', 'Class Mistress']).map((item) => <option key={item}>{item}</option>)}</select></label><button className="secondary-button" disabled={!rows.length || active >= rows.length - 1} onClick={() => setActive((index) => Math.min(index + 1, rows.length - 1))}>Next student <ChevronRight size={16} /></button>{!readOnly && <button className="primary-button" disabled={saving || loading || !hasAttendanceMark} onClick={save}>{saving ? 'Sending...' : submitToAdmin ? 'Send to administrator' : 'Save attendance'}<Check size={16} /></button>}</div></div>
       </section>
       <aside className="panel rollcall-aside"><div className="callout-icon"><CircleUserRound size={22} /></div><p className="eyebrow">NAME CALL</p><h2>{current?.full_name || 'Ready for roll call'}</h2><p>{current ? `${current.student_number} · ${current.level} ${current.trade}` : 'Choose a student from the list to focus your call.'}</p><div className="callout-divider" /><div className="callout-meta"><span>Current mark</span><StatusBadge status={current?.status || 'Not Marked'} /></div><div className="callout-controls"><button className="secondary-button" disabled={active <= 0} onClick={() => setActive((index) => Math.max(index - 1, 0))}><ChevronLeft size={16} />Previous</button><button className="primary-button" disabled={!rows.length || active >= rows.length - 1} onClick={() => setActive((index) => Math.min(index + 1, rows.length - 1))}>Next student<ChevronRight size={16} /></button></div></aside></div>}
   </>
@@ -626,6 +696,74 @@ function ReportsPage({ token, students, classes, attendance, permissions, behavi
   </>
 }
 
+function DailyReportsPage({ token, classes, students, user, reports, onRefresh, notify, reportError }) {
+  const [form, setForm] = useState({ date: today, subject: user?.subject || '', lessons: '', behaviourNotes: '', studentId: '' })
+  const [saving, setSaving] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await request('/reports', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ ...form, studentId: form.studentId || null }),
+      })
+      setForm((current) => ({ ...current, lessons: '', behaviourNotes: '', studentId: '' }))
+      notify('Daily report sent to the administrator.')
+      await onRefresh()
+    } catch (error) { reportError(error.message) }
+    finally { setSaving(false) }
+  }
+  const classLabel = classes[0] ? `${classes[0].level} · ${classes[0].trade} · ${classes[0].class_name}` : 'Your assigned class'
+  return <>
+    <PageHeading eyebrow="SCHOOL DAY" title={user?.role === 'Teacher' ? 'Teacher daily report' : 'Class monitor report'} description={`Submit the subjects and lessons covered, and send any behaviour concerns directly to the administrator. ${classLabel}.`} />
+    <section className="panel settings-card"><h2>Send today’s report</h2><p>Reports are visible to the school administrator after submission.</p>
+      <form className="modal-form" onSubmit={submit}>
+        <div className="field-grid two">
+          <label>Date<input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+          <label>Subject<input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Subject taught" /></label>
+        </div>
+        <label>Lessons covered<textarea required rows="4" value={form.lessons} onChange={(event) => setForm({ ...form, lessons: event.target.value })} placeholder="Topics, exercises, and work completed today" /></label>
+        <div className="field-grid two">
+          <label>Student behaviour concern (optional)<select value={form.studentId} onChange={(event) => setForm({ ...form, studentId: event.target.value })}><option value="">No student referral</option>{students.filter((student) => student.status === 'Active').map((student) => <option key={student.id} value={student.id}>{student.full_name} · {student.student_number}</option>)}</select></label>
+          <label>Details for administrator<textarea rows="3" value={form.behaviourNotes} onChange={(event) => setForm({ ...form, behaviourNotes: event.target.value })} placeholder="Describe the concern and relevant context" /></label>
+        </div>
+        <div className="modal-actions"><button className="primary-button" disabled={saving}>{saving ? 'Sending...' : 'Send report to administrator'}<ArrowUpRight size={16} /></button></div>
+      </form>
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Reports from your class</h2><p>Your recent submissions.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE</th><th>SUBJECT</th><th>LESSONS</th><th>BEHAVIOUR REFERRAL</th><th>SENT</th></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td>{String(report.report_date).slice(0, 10)}</td><td>{report.subject}</td><td>{report.lessons}</td><td>{report.student_name ? `${report.student_name}: ${report.behaviour_notes || ''}` : report.behaviour_notes || '—'}</td><td>{formatDateTime(report.created_at)}</td></tr>)}</tbody></table></div>
+      {!reports.length && <EmptyState message="No reports have been submitted for this class yet." />}
+    </section>
+  </>
+}
+
+function ReportsInboxPage({ token, data, onRefresh, reportError, notify }) {
+  async function deleteReport(id) {
+    if (!window.confirm('Delete this daily report? This action cannot be undone.')) return
+    try {
+      await request(`/reports/${id}`, { token, method: 'DELETE' })
+      notify('Daily report deleted.')
+      await onRefresh()
+    } catch (error) { reportError(error.message) }
+  }
+  return <>
+    <PageHeading eyebrow="ADMINISTRATOR" title="Reports inbox" description="Daily subject reports, attendance registers submitted by monitors, and Kinyarwanda guardian messages awaiting an SMS gateway." action={<button className="secondary-button" onClick={() => void onRefresh()}><Activity size={15} />Refresh inbox</button>} />
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Daily subject and behaviour reports</h2><p>Teachers and class monitors submit reports directly to this inbox.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE</th><th>CLASS</th><th>FROM</th><th>SUBJECT</th><th>LESSONS</th><th>BEHAVIOUR CONCERN</th><th>ACTION</th></tr></thead><tbody>{data.reports.map((report) => <tr key={report.id}><td>{String(report.report_date).slice(0, 10)}</td><td>{report.level} · {report.trade} · {report.class_name}</td><td>{report.author} · {report.report_type}</td><td>{report.subject}</td><td>{report.lessons}</td><td>{report.student_name ? <strong>{report.student_name}: </strong> : null}{report.behaviour_notes || '—'}</td><td><button className="secondary-button" onClick={() => deleteReport(report.id)}>Delete</button></td></tr>)}</tbody></table></div>
+      {!data.reports.length && <EmptyState message="No daily reports have been submitted." />}
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Attendance sent to administrator</h2><p>Class monitor registers explicitly submitted for review.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE</th><th>CLASS</th><th>TAKEN BY</th><th>SUBMITTED BY</th><th>PRESENT</th><th>ABSENT</th><th>LATE</th><th>AWAY</th><th>UNMARKED</th></tr></thead><tbody>{data.attendance.map((record) => <tr key={record.id}><td>{String(record.date).slice(0, 10)}</td><td>{record.level} · {record.trade} · {record.class_name}</td><td>{record.attended_by}</td><td>{record.author}</td><td>{record.present}</td><td>{record.absent}</td><td>{record.late}</td><td>{record.away}</td><td>{record.not_marked}</td></tr>)}</tbody></table></div>
+      {!data.attendance.length && <EmptyState message="No attendance registers have been submitted." />}
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Guardian message outbox</h2><p>Permission approvals create Kinyarwanda messages. They are not sent by SMS until an SMS service is configured.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>GUARDIAN NUMBER</th><th>KINYARWANDA MESSAGE</th><th>CREATED</th></tr></thead><tbody>{data.messages.map((message) => <tr key={message.id}><td>{message.student_name}</td><td>{message.recipient}</td><td>{message.message}</td><td>{formatDateTime(message.created_at)}</td></tr>)}</tbody></table></div>
+      {!data.messages.length && <EmptyState message="No guardian messages are waiting in the outbox." />}
+    </section>
+  </>
+}
+
 function SettingsPage({ token, user, classes, onCreateClass, reportError, notify }) {
   const [users, setUsers] = useState([])
   const [showForm, setShowForm] = useState(false)
@@ -651,6 +789,14 @@ function SettingsPage({ token, user, classes, onCreateClass, reportError, notify
       setShowForm(false)
       setForm({ username: '', name: '', password: '', role: 'Patron' })
       notify('User account created.')
+    } catch (error) { reportError(error.message) }
+  }
+  async function reviewAccount(id, status) {
+    try {
+      await request(`/users/${id}/approval`, { token, method: 'PATCH', body: JSON.stringify({ status }) })
+      const data = await request('/users', { token })
+      setUsers(data.users)
+      notify(`Account request ${status.toLowerCase()}.`)
     } catch (error) { reportError(error.message) }
   }
   async function createClass(event) {
@@ -681,7 +827,7 @@ function SettingsPage({ token, user, classes, onCreateClass, reportError, notify
   return <>
     <PageHeading eyebrow="PREFERENCES" title="Settings" description="School structure and account access for this workspace." />
     <div className="settings-grid"><section className="panel settings-card"><div className="settings-card-heading"><div className="settings-icon"><GraduationCap size={20} /></div>{user?.role === 'Administrator' && <button className="secondary-button" onClick={() => setShowClassForm(true)}><Plus size={14} />Add class</button>}</div><h2>School structure</h2><p>Student classes are filtered by level and trade throughout the system.</p><div className="structure-list">{levels.map((level) => <div key={level}><strong>{level}</strong><span>{trades.map((trade) => `${trade} · ${classes.filter((item) => item.level === level && item.trade === trade).map((item) => item.class_name).join(', ') || 'No classes'}`).join('  |  ')}</span></div>)}</div><small className="settings-note">{user?.role === 'Administrator' ? 'Add a class to update student registration and attendance options.' : 'School structure changes are managed by your system administrator.'}</small></section><section className="panel settings-card"><div className="settings-icon green"><UserRound size={20} /></div><h2>Your account</h2><p>Signed in identity and permissions for this session.</p><div className="account-detail"><span>Name</span><strong>{user?.name}</strong></div><div className="account-detail"><span>Username</span><strong>{user?.username}</strong></div><div className="account-detail"><span>Role</span><strong><StatusBadge status={user?.role} /></strong></div><div className="access-note"><ShieldCheck size={16} />Permission approval is restricted to authorized approvers and administrators.</div></section><section className="panel settings-card"><div className="settings-icon green"><LockKeyhole size={20} /></div><h2>Change password</h2><p>Choose a new password with at least 12 characters. Your current password is required to confirm this change.</p>{passwordError && <div className="form-error" role="alert">{passwordError}</div>}<form className="settings-password-form" onSubmit={changePassword}><label>Current password<input required type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label><label>New password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label><label>Confirm new password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label><button className="primary-button"><LockKeyhole size={15} />Update password</button></form></section></div>
-    {user?.role === 'Administrator' && <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>User management</h2><p>Grant the least access required for each staff member.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME</th><th>ROLE</th><th>ADDED</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.username}</td><td><StatusBadge status={account.role} /></td><td>{new Date(account.created_at).toLocaleDateString()}</td></tr>)}</tbody></table></div></section>}
+    {user?.role === 'Administrator' && <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>User management</h2><p>Review teacher and class monitor requests before granting access.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME</th><th>ROLE</th><th>CLASS / DETAILS</th><th>APPROVAL</th><th>ADDED</th><th>ACTION</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.username}</td><td><StatusBadge status={account.role} /></td><td>{account.level ? `${account.level} · ${account.trade} · ${account.class_name}` : '—'}{account.subject ? ` · ${account.subject}` : ''}{account.class_mistress_name ? ` · Mistress: ${account.class_mistress_name}` : ''}</td><td><StatusBadge status={account.approval_status} /></td><td>{new Date(account.created_at).toLocaleDateString()}</td><td>{account.approval_status === 'Pending' && <div className="approval-actions"><button className="primary-button" onClick={() => reviewAccount(account.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewAccount(account.id, 'Rejected')}>Reject</button></div>}</td></tr>)}</tbody></table></div></section>}
     {showForm && <Modal title="Create user account" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={createUser}><label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Username<input required autoComplete="off" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><div className="field-grid two"><label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option>Patron</option><option>Authorized Approver</option><option>Read-only Staff</option><option>Administrator</option></select></label><label>Password (12+ characters)<input required minLength="12" type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Create account</button></div></form></Modal>}
     {showClassForm && <Modal title="Add a school class" onClose={() => setShowClassForm(false)}><form className="modal-form" onSubmit={createClass}><div className="field-grid two"><label>Level<select value={classForm.level} onChange={(event) => setClassForm({ ...classForm, level: event.target.value })}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label><label>Trade<select value={classForm.trade} onChange={(event) => setClassForm({ ...classForm, trade: event.target.value })}>{trades.map((trade) => <option key={trade}>{trade}</option>)}</select></label></div><label>Class name<input required pattern="Class [A-Z]" title="Use a name such as Class C" value={classForm.className} onChange={(event) => setClassForm({ ...classForm, className: event.target.value })} placeholder="Class C" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowClassForm(false)}>Cancel</button><button className="primary-button">Add class</button></div></form></Modal>}
   </>
