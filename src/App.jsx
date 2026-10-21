@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Activity, ArrowDownToLine, ArrowUpRight, Bell, BookOpen, CalendarDays,
+  Activity, ArrowDownToLine, ArrowUpRight, Bell, BookOpen, CalendarDays, Code2,
   Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, ClipboardCheck,
   Clock3, Download, FileBarChart2, GraduationCap, LayoutDashboard, LockKeyhole, LogOut,
+  Mail, MapPin, Zap,
   Menu, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, UserRound,
   Users, X, XCircle,
 } from 'lucide-react'
@@ -78,7 +79,8 @@ function ClassFields({ values, onChange, classes }) {
 }
 
 function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('patron_token') || '')
+  const [token, setToken] = useState(() => sessionStorage.getItem('estgtss_session_token') || '')
+  const [showLogin, setShowLogin] = useState(false)
   const [user, setUser] = useState(null)
   const [page, setPage] = useState('Overview')
   const [students, setStudents] = useState([])
@@ -95,6 +97,8 @@ function App() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => { localStorage.removeItem('patron_token') }, [])
 
   const refresh = useCallback(async () => {
     if (!token) return
@@ -123,8 +127,9 @@ function App() {
     } catch (requestError) {
       if (requestError.message.toLowerCase().includes('token') ||
           requestError.message.toLowerCase().includes('session') ||
-          requestError.message.toLowerCase().includes('authentication')) {
-        localStorage.removeItem('patron_token')
+          requestError.message.toLowerCase().includes('authentication') ||
+          requestError.message.toLowerCase().includes('account is no longer active')) {
+        sessionStorage.removeItem('estgtss_session_token')
         setToken('')
         setUser(null)
       } else setError(requestError.message)
@@ -137,6 +142,23 @@ function App() {
     const timeout = window.setTimeout(() => { void refresh() }, 0)
     return () => window.clearTimeout(timeout)
   }, [refresh])
+  useEffect(() => {
+    if (!token) return undefined
+    let cancelled = false
+    const validateSession = () => {
+      request('/auth/me', { token }).catch((requestError) => {
+        const message = requestError.message.toLowerCase()
+        if (cancelled || !['account is no longer active', 'session is invalid or has expired', 'authentication is required'].some((reason) => message.includes(reason))) return
+        sessionStorage.removeItem('estgtss_session_token')
+        setToken('')
+        setUser(null)
+        setShowLogin(true)
+        setError(requestError.message)
+      })
+    }
+    const interval = window.setInterval(validateSession, 30000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [token])
   useEffect(() => {
     if (user?.role !== 'Administrator') return undefined
     let cancelled = false
@@ -197,12 +219,14 @@ function App() {
   }
 
   function logout() {
-    localStorage.removeItem('patron_token')
+    sessionStorage.removeItem('estgtss_session_token')
     setToken('')
     setUser(null)
+    setShowLogin(false)
   }
 
-  if (!token) return <Login onLogin={(newToken) => { localStorage.setItem('patron_token', newToken); setToken(newToken) }} />
+  if (!token && !showLogin) return <WelcomePage onSignIn={() => setShowLogin(true)} />
+  if (!token) return <Login onBack={() => setShowLogin(false)} onLogin={(newToken) => { sessionStorage.setItem('estgtss_session_token', newToken); setToken(newToken) }} />
 
   return (
     <div className="app-shell">
@@ -263,7 +287,52 @@ function App() {
   )
 }
 
-function Login({ onLogin }) {
+function WelcomePage({ onSignIn }) {
+  return <main className="welcome-page">
+    <header className="welcome-header">
+      <a className="welcome-brand" href="#top" aria-label="ESTG TSS home"><span><GraduationCap size={22} /></span><strong>ESTG TSS<small>Gisenyi · Rwanda</small></strong></a>
+      <nav aria-label="Main navigation"><a href="#about">About</a><a href="#programs">Trades</a><a href="#contact">Contact</a></nav>
+      <button className="primary-button" onClick={onSignIn}>Sign in <ArrowUpRight size={16} /></button>
+    </header>
+    <section className="welcome-hero" id="top">
+      <div className="welcome-hero-copy">
+        <span className="welcome-kicker"><i /> LEARN · CREATE · BUILD</span>
+        <h1>Skills for a brighter, more connected future.</h1>
+        <p className="welcome-school-name">Ecole secondaire Technique de Gisenyi</p>
+        <p className="welcome-intro">A community where curious minds turn ideas into useful technology—from the first line of code to the circuits that power our world.</p>
+        <div className="welcome-hero-actions"><button className="primary-button" onClick={onSignIn}>Enter the school portal <ArrowUpRight size={17} /></button><a className="welcome-text-link" href="#programs">Explore our trades <ChevronDown size={16} /></a></div>
+        <div className="welcome-hero-note"><span><Code2 size={16} /> Software development</span><span><Zap size={16} /> Electrical technology</span></div>
+      </div>
+      <div className="welcome-art" role="img" aria-label="Illustration of software code and electrical circuits">
+        <div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" />
+        <div className="art-board">
+          <div className="art-window-bar"><i /><i /><i /><span>ESTG · learn by doing</span></div>
+          <div className="art-code"><span>01</span><code><b>const</b> ideas = <em>"big"</em>;</code><span>02</span><code><b>build</b>(ideas, skills);</code><span>03</span><code><i>// make it real</i></code><strong>›</strong></div>
+          <div className="art-circuit"><span /><span /><span /><i /><i /><i /><b /></div>
+        </div>
+        <div className="art-float float-code"><Code2 size={18} /><span>Think<br /><strong>in code</strong></span></div>
+        <div className="art-float float-power"><Zap size={18} /><span>Build<br /><strong>with purpose</strong></span></div>
+        <div className="art-spark">✳</div>
+      </div>
+    </section>
+    <section className="welcome-values" aria-label="Our approach"><div><strong>Curiosity</strong><span>Ask better questions</span></div><div><strong>Practical skills</strong><span>Learn by making</span></div><div><strong>Opportunity</strong><span>Prepare for what’s next</span></div></section>
+    <section className="welcome-section welcome-about" id="about">
+      <div className="welcome-section-title"><span>01 — ABOUT US</span><h2>Knowledge with a hands-on spirit.</h2></div>
+      <div className="welcome-about-copy"><p>Ecole secondaire Technique de Gisenyi (ESTG TSS) is a technical secondary school in Gisenyi, Rwanda. We bring classroom learning closer to the real challenges students will meet in technology and work.</p><p>Our goal is to help every learner grow in confidence, think creatively, work responsibly, and contribute to their community.</p><button className="welcome-inline-link" onClick={onSignIn}>Visit the school portal <ArrowUpRight size={15} /></button></div>
+    </section>
+    <section className="welcome-section welcome-programs" id="programs">
+      <div className="welcome-section-title"><span>02 — TECHNICAL TRADES</span><h2>Choose a path. Make an impact.</h2><p>Explore software and electrical technology through practical learning and problem-solving.</p></div>
+      <div className="welcome-program-grid">
+        <article className="welcome-program-card software-card"><div className="welcome-program-icon"><Code2 size={23} /></div><span className="welcome-program-label">SOD · LEVELS 3–5</span><h3>Software Development</h3><p>Explore programming, web experiences, databases, and the design thinking behind helpful digital tools.</p><div className="program-tags"><span>Write code</span><span>Design solutions</span><span>Build for people</span></div></article>
+        <article className="welcome-program-card electrical-card"><div className="welcome-program-icon"><Zap size={23} /></div><span className="welcome-program-label">ELET · LEVELS 3–5</span><h3>Electrical Technology</h3><p>Discover electrical systems, safe practical work, circuits, and the technology that keeps communities connected.</p><div className="program-tags"><span>Understand circuits</span><span>Work safely</span><span>Power ideas</span></div></article>
+      </div>
+    </section>
+    <section className="welcome-callout"><div><span>THE NEXT BIG IDEA CAN START HERE.</span><h2>Learn something. Build something. Share it.</h2></div><button className="welcome-light-button" onClick={onSignIn}>Open ESTG TSS portal <ArrowUpRight size={16} /></button></section>
+    <footer className="welcome-footer" id="contact"><div className="footer-school"><span className="welcome-footer-mark"><GraduationCap size={19} /></span><div><strong>Ecole secondaire Technique de Gisenyi</strong><p>Practical learning for a changing world.</p></div></div><div className="footer-contact"><span><MapPin size={15} />Gisenyi, Rwanda</span><span><Mail size={15} />For enquiries, contact the school office.</span></div><span className="footer-copyright">ESTG TSS · Learn with purpose.</span></footer>
+  </main>
+}
+
+function Login({ onLogin, onBack }) {
   const [mode, setMode] = useState('login')
   const [username, setUsername] = useState('')
   const [name, setName] = useState('')
@@ -324,6 +393,7 @@ function Login({ onLogin }) {
   return (
     <main className="login-page">
       <div className="login-card">
+        <button className="text-button login-home-link" onClick={onBack}><ChevronLeft size={15} />Back to school home</button>
         <div className="login-logo"><GraduationCap size={27} /></div>
         <p className="eyebrow">ESTG TSS · SCHOOL PATRON</p>
         <h1>{!isSignup ? 'Welcome back' : `Request a ${mode === 'student' ? 'student' : mode === 'teacher' ? 'teacher' : 'class monitor'} account`}</h1>
@@ -780,8 +850,33 @@ function ReportsPage({ token, students, classes, attendance, permissions, behavi
 }
 
 function DailyReportsPage({ token, classes, students, user, reports, onRefresh, notify, reportError }) {
-  const [form, setForm] = useState({ date: today, subject: user?.subject || '', lessons: '', behaviourNotes: '', studentId: '' })
+  const [assignments, setAssignments] = useState([])
+  const [assignmentForm, setAssignmentForm] = useState({ classId: '', subject: '' })
+  const [form, setForm] = useState({ date: today, classId: user?.class_id ? String(user.class_id) : '', subject: user?.subject || '', lessons: '', behaviourNotes: '', studentId: '' })
   const [saving, setSaving] = useState(false)
+  const [savingAssignment, setSavingAssignment] = useState(false)
+  useEffect(() => {
+    if (user?.role !== 'Teacher') return undefined
+    let cancelled = false
+    request('/teacher/assignments', { token })
+      .then((data) => {
+        if (cancelled) return
+        setAssignments(data.assignments)
+        setForm((current) => ({
+          ...current,
+          classId: current.classId || (data.assignments[0] ? String(data.assignments[0].class_id) : ''),
+          subject: current.subject || data.assignments[0]?.subject || '',
+        }))
+      })
+      .catch((error) => { if (!cancelled) reportError(error.message) })
+    return () => { cancelled = true }
+  }, [token, user?.role, reportError])
+  const assignedSubjects = assignments
+    .filter((assignment) => assignment.approval_status === 'Approved' && String(assignment.class_id) === form.classId)
+    .map((assignment) => assignment.subject)
+  const approvedAssignments = assignments.filter((assignment) => assignment.approval_status === 'Approved')
+  const selectedClass = classes.find((item) => String(item.id) === form.classId)
+  const selectedSubject = assignedSubjects.includes(form.subject) ? form.subject : (assignedSubjects[0] || '')
   async function submit(event) {
     event.preventDefault()
     setSaving(true)
@@ -789,26 +884,67 @@ function DailyReportsPage({ token, classes, students, user, reports, onRefresh, 
       await request('/reports', {
         token,
         method: 'POST',
-        body: JSON.stringify({ ...form, studentId: form.studentId || null }),
+        body: JSON.stringify({ ...form, subject: user?.role === 'Teacher' ? selectedSubject : form.subject, classId: form.classId || classes[0]?.id, studentId: form.studentId || null }),
       })
-      setForm((current) => ({ ...current, lessons: '', behaviourNotes: '', studentId: '' }))
+      setForm((current) => ({ ...current, subject: user?.role === 'Teacher' ? selectedSubject : current.subject, lessons: '', behaviourNotes: '', studentId: '' }))
       notify('Daily report sent to the administrator.')
       await onRefresh()
     } catch (error) { reportError(error.message) }
     finally { setSaving(false) }
   }
-  const classLabel = classes[0] ? `${classes[0].level} · ${classes[0].trade} · ${classes[0].class_name}` : 'Your assigned class'
+  async function addAssignment(event) {
+    event.preventDefault()
+    setSavingAssignment(true)
+    try {
+      await request('/teacher/assignments', { token, method: 'POST', body: JSON.stringify(assignmentForm) })
+      const data = await request('/teacher/assignments', { token })
+      setAssignments(data.assignments)
+      setAssignmentForm({ classId: '', subject: '' })
+      notify('Teaching assignment sent to the administrator for approval.')
+      await onRefresh()
+    } catch (error) { reportError(error.message) }
+    finally { setSavingAssignment(false) }
+  }
+  async function removeAssignment(assignment) {
+    if (!window.confirm(`Remove ${assignment.subject} from ${assignment.level} ${assignment.trade} ${assignment.class_name}?`)) return
+    try {
+      await request(`/teacher/assignments/${assignment.id}`, { token, method: 'DELETE' })
+      const data = await request('/teacher/assignments', { token })
+      setAssignments(data.assignments)
+      setForm((current) => current.classId === String(assignment.class_id) && current.subject === assignment.subject
+        ? { ...current, subject: '' }
+        : current)
+      notify('Teaching assignment removed.')
+      await onRefresh()
+    } catch (error) { reportError(error.message) }
+  }
+  const classLabel = selectedClass ? `${selectedClass.level} · ${selectedClass.trade} · ${selectedClass.class_name}` : (classes[0] ? `${classes[0].level} · ${classes[0].trade} · ${classes[0].class_name}` : 'Your assigned classes')
   return <>
     <PageHeading eyebrow="SCHOOL DAY" title={user?.role === 'Teacher' ? 'Teacher daily report' : 'Class monitor report'} description={`Submit the subjects and lessons covered, and send any behaviour concerns directly to the administrator. ${classLabel}.`} />
+    {user?.role === 'Teacher' && <section className="panel settings-card teacher-assignment-panel"><div className="table-toolbar"><div><h2>Your teaching assignments</h2><p>Record each subject you teach for every class, including SOD and ELET classes across Levels 3–5.</p></div></div>
+      <form className="teacher-assignment-form" onSubmit={addAssignment}>
+        <label>Level · trade · class<select required value={assignmentForm.classId} onChange={(event) => setAssignmentForm({ ...assignmentForm, classId: event.target.value })}><option value="">Choose a class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.level} · {item.trade} · {item.class_name}</option>)}</select></label>
+        <label>Subject you teach<input required maxLength={120} value={assignmentForm.subject} onChange={(event) => setAssignmentForm({ ...assignmentForm, subject: event.target.value })} placeholder="e.g. Software Development" /></label>
+        <button className="primary-button" disabled={savingAssignment}><Plus size={15} />{savingAssignment ? 'Saving…' : 'Add assignment'}</button>
+      </form>
+      <div className="teacher-assignment-list">{assignments.map((assignment) => <div key={assignment.id}><span><strong>{assignment.level} · {assignment.trade} · {assignment.class_name}</strong><small>{assignment.subject}{assignment.approval_status === 'Pending' ? ' · Waiting for administrator approval' : ''}</small></span><button className="secondary-button" onClick={() => void removeAssignment(assignment)}>Remove</button></div>)}{!assignments.length && <EmptyState message="Add the classes and subjects you teach before submitting a daily report." />}</div>
+    </section>}
     <section className="panel settings-card"><h2>Send today’s report</h2><p>Reports are visible to the school administrator after submission.</p>
       <form className="modal-form" onSubmit={submit}>
         <div className="field-grid two">
           <label>Date<input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-          <label>Subject<input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Subject taught" /></label>
+          {user?.role === 'Teacher' ? <>
+            <label>Class<select required value={form.classId} onChange={(event) => {
+              const classId = event.target.value
+              const subject = assignments.find((assignment) => String(assignment.class_id) === classId)?.subject || ''
+              setForm({ ...form, classId, subject, studentId: '' })
+            }}><option value="">Choose a class</option>{[...new Map(approvedAssignments.map((assignment) => [String(assignment.class_id), assignment])).values()].map((assignment) => <option key={assignment.class_id} value={assignment.class_id}>{assignment.level} · {assignment.trade} · {assignment.class_name}</option>)}</select></label>
+            <label>Subject taught<select required value={selectedSubject} onChange={(event) => setForm({ ...form, subject: event.target.value })}><option value="">Choose your subject</option>{assignedSubjects.map((subject) => <option key={subject}>{subject}</option>)}</select></label>
+          </> : <label>Subject<input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Subject taught" /></label>}
         </div>
         <label>Lessons covered<textarea required rows="4" value={form.lessons} onChange={(event) => setForm({ ...form, lessons: event.target.value })} placeholder="Topics, exercises, and work completed today" /></label>
         <div className="field-grid two">
-          <label>Student behaviour concern (optional)<select value={form.studentId} onChange={(event) => setForm({ ...form, studentId: event.target.value })}><option value="">No student referral</option>{students.filter((student) => student.status === 'Active').map((student) => <option key={student.id} value={student.id}>{student.full_name} · {student.student_number}</option>)}</select></label>
+          <label>Student behaviour concern (optional)<select value={form.studentId} onChange={(event) => setForm({ ...form, studentId: event.target.value })}><option value="">No student referral</option>{students.filter((student) => student.status === 'Active' && (user?.role !== 'Teacher' || String(student.class_id) === form.classId)).map((student) => <option key={student.id} value={student.id}>{student.full_name} · {student.student_number}</option>)}</select></label>
           <label>Details for administrator<textarea rows="3" value={form.behaviourNotes} onChange={(event) => setForm({ ...form, behaviourNotes: event.target.value })} placeholder="Describe the concern and relevant context" /></label>
         </div>
         <div className="modal-actions"><button className="primary-button" disabled={saving}>{saving ? 'Sending...' : 'Send report to administrator'}<ArrowUpRight size={16} /></button></div>
@@ -816,7 +952,7 @@ function DailyReportsPage({ token, classes, students, user, reports, onRefresh, 
     </section>
     <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Reports from your class</h2><p>Your recent submissions.</p></div></div>
       <div className="table-scroll"><table><thead><tr><th>DATE</th><th>SUBJECT</th><th>LESSONS</th><th>BEHAVIOUR REFERRAL</th><th>SENT</th></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td>{String(report.report_date).slice(0, 10)}</td><td>{report.subject}</td><td>{report.lessons}</td><td>{report.student_name ? `${report.student_name}: ${report.behaviour_notes || ''}` : report.behaviour_notes || '—'}</td><td>{formatDateTime(report.created_at)}</td></tr>)}</tbody></table></div>
-      {!reports.length && <EmptyState message="No reports have been submitted for this class yet." />}
+      {!reports.length && <EmptyState message="No reports have been submitted for your classes yet." />}
     </section>
   </>
 }
@@ -849,6 +985,7 @@ function ReportsInboxPage({ token, data, onRefresh, reportError, notify }) {
 
 function SettingsPage({ token, user, classes, onCreateClass, onPendingAccountRequestsChange, reportError, notify }) {
   const [users, setUsers] = useState([])
+  const [teacherAssignments, setTeacherAssignments] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [showClassForm, setShowClassForm] = useState(false)
   const [form, setForm] = useState({ username: '', name: '', password: '', role: 'Patron' })
@@ -858,8 +995,15 @@ function SettingsPage({ token, user, classes, onCreateClass, onPendingAccountReq
   useEffect(() => {
     if (user?.role !== 'Administrator') return undefined
     let cancelled = false
-    request('/users', { token })
-      .then((data) => { if (!cancelled) setUsers(data.users) })
+    Promise.all([
+      request('/users', { token }),
+      request('/admin/teacher-assignments', { token }),
+    ])
+      .then(([userData, assignmentData]) => {
+        if (cancelled) return
+        setUsers(userData.users)
+        setTeacherAssignments(assignmentData.assignments)
+      })
       .catch((error) => { if (!cancelled) reportError(error.message) })
     return () => { cancelled = true }
   }, [token, user?.role, reportError])
@@ -882,6 +1026,36 @@ function SettingsPage({ token, user, classes, onCreateClass, onPendingAccountReq
       const notifications = await request('/admin/notifications', { token })
       onPendingAccountRequestsChange(notifications.pendingAccountRequests)
       notify(`Account request ${status.toLowerCase()}.`)
+    } catch (error) { reportError(error.message) }
+  }
+  async function setTeacherStatus(account, isActive) {
+    const action = isActive ? 'restore this teacher account' : 'remove this teacher’s access'
+    if (!window.confirm(`Are you sure you want to ${action}?`)) return
+    try {
+      await request(`/users/${account.id}/status`, {
+        token,
+        method: 'PATCH',
+        body: JSON.stringify({ isActive }),
+      })
+      const data = await request('/users', { token })
+      setUsers(data.users)
+      notify(isActive ? 'Teacher access restored.' : 'Teacher access removed.')
+    } catch (error) { reportError(error.message) }
+  }
+  async function reviewTeachingAssignment(id, status) {
+    try {
+      await request(`/admin/teacher-assignments/${id}/approval`, {
+        token,
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      })
+      const [assignmentData, userData] = await Promise.all([
+        request('/admin/teacher-assignments', { token }),
+        request('/users', { token }),
+      ])
+      setTeacherAssignments(assignmentData.assignments)
+      setUsers(userData.users)
+      notify(`Teaching assignment ${status.toLowerCase()}.`)
     } catch (error) { reportError(error.message) }
   }
   async function createClass(event) {
@@ -912,7 +1086,8 @@ function SettingsPage({ token, user, classes, onCreateClass, onPendingAccountReq
   return <>
     <PageHeading eyebrow="PREFERENCES" title="Settings" description="School structure and account access for this workspace." />
     <div className="settings-grid"><section className="panel settings-card"><div className="settings-card-heading"><div className="settings-icon"><GraduationCap size={20} /></div>{user?.role === 'Administrator' && <button className="secondary-button" onClick={() => setShowClassForm(true)}><Plus size={14} />Add class</button>}</div><h2>School structure</h2><p>Student classes are filtered by level and trade throughout the system.</p><div className="structure-list">{levels.map((level) => <div key={level}><strong>{level}</strong><span>{trades.map((trade) => `${trade} · ${classes.filter((item) => item.level === level && item.trade === trade).map((item) => item.class_name).join(', ') || 'No classes'}`).join('  |  ')}</span></div>)}</div><small className="settings-note">{user?.role === 'Administrator' ? 'Add a class to update student registration and attendance options.' : 'School structure changes are managed by your system administrator.'}</small></section><section className="panel settings-card"><div className="settings-icon green"><UserRound size={20} /></div><h2>Your account</h2><p>Signed in identity and permissions for this session.</p><div className="account-detail"><span>Name</span><strong>{user?.name}</strong></div><div className="account-detail"><span>Username</span><strong>{user?.username}</strong></div><div className="account-detail"><span>Role</span><strong><StatusBadge status={user?.role} /></strong></div><div className="access-note"><ShieldCheck size={16} />Permission approval is restricted to authorized approvers and administrators.</div></section><section className="panel settings-card"><div className="settings-icon green"><LockKeyhole size={20} /></div><h2>Change password</h2><p>Choose a new password with at least 12 characters. Your current password is required to confirm this change.</p>{passwordError && <div className="form-error" role="alert">{passwordError}</div>}<form className="settings-password-form" onSubmit={changePassword}><label>Current password<input required type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label><label>New password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label><label>Confirm new password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label><button className="primary-button"><LockKeyhole size={15} />Update password</button></form></section></div>
-    {user?.role === 'Administrator' && <section className="panel table-panel user-management" id="account-requests"><div className="table-toolbar"><div><h2>Account requests {users.filter((account) => account.approval_status === 'Pending').length > 0 && <span className="request-count">{users.filter((account) => account.approval_status === 'Pending').length} pending</span>}</h2><p>Teacher, class monitor, and student signups arrive here. Approve or reject each request.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add staff user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME / STUDENT ID</th><th>ACCOUNT TYPE</th><th>CLASS / DETAILS</th><th>APPROVAL</th><th>ADDED</th><th>ACTION</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.linked_student_number || account.username}</td><td><StatusBadge status={account.role} /></td><td>{account.linked_student_number ? 'Student ID matched to school register' : account.level ? `${account.level} · ${account.trade} · ${account.class_name}` : '—'}{account.subject ? ` · ${account.subject}` : ''}{account.class_mistress_name ? ` · Mistress: ${account.class_mistress_name}` : ''}</td><td><StatusBadge status={account.approval_status} /></td><td>{new Date(account.created_at).toLocaleDateString()}</td><td>{account.approval_status === 'Pending' && <div className="approval-actions"><button className="primary-button" onClick={() => reviewAccount(account.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewAccount(account.id, 'Rejected')}>Reject</button></div>}</td></tr>)}</tbody></table></div>{!users.length && <EmptyState message="No account requests or staff accounts yet." />}</section>}
+    {user?.role === 'Administrator' && <section className="panel table-panel user-management" id="account-requests"><div className="table-toolbar"><div><h2>Account requests {users.filter((account) => account.approval_status === 'Pending').length > 0 && <span className="request-count">{users.filter((account) => account.approval_status === 'Pending').length} pending</span>}</h2><p>Review new requests, approve access, and remove teachers who have left the school.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add staff user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME / STUDENT ID</th><th>ACCOUNT TYPE</th><th>CLASS / TEACHING ASSIGNMENTS</th><th>ACCOUNT STATUS</th><th>ADDED</th><th>ACTION</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.linked_student_number || account.username}</td><td><StatusBadge status={account.role} /></td><td>{account.role === 'Teacher' ? (account.teaching_assignments || 'No teaching assignments') : account.linked_student_number ? 'Student ID matched to school register' : account.level ? `${account.level} · ${account.trade} · ${account.class_name}` : '—'}{account.role !== 'Teacher' && account.subject ? ` · ${account.subject}` : ''}{account.class_mistress_name ? ` · Mistress: ${account.class_mistress_name}` : ''}</td><td>{account.approval_status === 'Pending' ? <StatusBadge status="Pending" /> : <StatusBadge status={account.is_active ? 'Active' : 'Removed'} />}</td><td>{new Date(account.created_at).toLocaleDateString()}</td><td>{account.approval_status === 'Pending' ? <div className="approval-actions"><button className="primary-button" onClick={() => reviewAccount(account.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewAccount(account.id, 'Rejected')}>Reject</button></div> : account.role === 'Teacher' && account.approval_status === 'Approved' && <button className={account.is_active ? 'secondary-button' : 'primary-button'} onClick={() => void setTeacherStatus(account, !account.is_active)}>{account.is_active ? 'Remove teacher' : 'Restore access'}</button>}</td></tr>)}</tbody></table></div>{!users.length && <EmptyState message="No account requests or staff accounts yet." />}</section>}
+    {user?.role === 'Administrator' && <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>Teacher subject and class approvals {teacherAssignments.filter((assignment) => assignment.approval_status === 'Pending').length > 0 && <span className="request-count">{teacherAssignments.filter((assignment) => assignment.approval_status === 'Pending').length} pending</span>}</h2><p>Teachers can request each subject they teach in each class. Approve assignments before they can report or access those students.</p></div></div><div className="table-scroll"><table><thead><tr><th>TEACHER</th><th>LEVEL</th><th>TRADE</th><th>CLASS</th><th>SUBJECT</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>{teacherAssignments.map((assignment) => <tr key={assignment.id}><td><strong>{assignment.teacher_name}</strong><small className="sub-cell">{assignment.username}</small></td><td>{assignment.level}</td><td>{assignment.trade}</td><td>{assignment.class_name}</td><td>{assignment.subject}</td><td><StatusBadge status={assignment.approval_status} /></td><td>{assignment.approval_status === 'Pending' && <div className="approval-actions"><button className="primary-button" onClick={() => reviewTeachingAssignment(assignment.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewTeachingAssignment(assignment.id, 'Rejected')}>Reject</button></div>}</td></tr>)}</tbody></table></div>{!teacherAssignments.length && <EmptyState message="No teaching assignments have been submitted." />}</section>}
     {showForm && <Modal title="Create user account" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={createUser}><label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Username<input required autoComplete="off" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><div className="field-grid two"><label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option>Patron</option><option>Authorized Approver</option><option>Read-only Staff</option><option>Administrator</option></select></label><label>Password (12+ characters)<input required minLength="12" type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Create account</button></div></form></Modal>}
     {showClassForm && <Modal title="Add a school class" onClose={() => setShowClassForm(false)}><form className="modal-form" onSubmit={createClass}><div className="field-grid two"><label>Level<select value={classForm.level} onChange={(event) => setClassForm({ ...classForm, level: event.target.value })}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label><label>Trade<select value={classForm.trade} onChange={(event) => setClassForm({ ...classForm, trade: event.target.value })}>{trades.map((trade) => <option key={trade}>{trade}</option>)}</select></label></div><label>Class name<input required pattern="Class [A-Z]" title="Use a name such as Class C" value={classForm.className} onChange={(event) => setClassForm({ ...classForm, className: event.target.value })} placeholder="Class C" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowClassForm(false)}>Cancel</button><button className="primary-button">Add class</button></div></form></Modal>}
   </>
