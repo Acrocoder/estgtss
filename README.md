@@ -80,6 +80,8 @@ The first server start creates the schema, seeds the currently configured level/
 - Teachers can submit a subject assignment for each class they teach across Levels 3–5 and the SOD/ELET trades. Administrators approve assignments before teachers can submit class reports or access student records in that class. The administrator can suspend and restore a teacher account without deleting their audit history or submitted reports.
 - Teachers and class monitors request accounts with their assigned class; monitor requests include the class mistress's name. Student accounts are limited to their own linked attendance, permission, behaviour, and report records.
 - The public welcome page introduces Ecole secondaire Technique de Gisenyi, its technical trades, and the school portal. Authenticated sessions are kept in per-tab session storage; the API reloads the current active account and role from the database on each request.
+- The public school website has linked Home, About, Trades, News, Gallery, Student Life, Clubs, Events, and Contact pages. The contact form delivers messages to the administrator's portal inbox; administrators can publish and remove school news under **School News**. News is stored in MySQL and shown on the public News page.
+- The hero and gallery use original local SVG illustrations, so they do not depend on remote image hosts. Replace these illustrations with approved school photographs when available. The Instagram and X links currently lead to the platforms, not verified ESTG accounts.
 - Class monitors record attendance as themselves or the class mistress and can explicitly submit the register to the administrator. Teachers and monitors submit daily subject/lesson reports; teachers can refer student behaviour concerns to the administrator.
 - Permission approval creates a Kinyarwanda guardian message in the administrator's outbox when a guardian phone number is registered. The message is queued for review only; sending SMS requires a configured SMS gateway and credentials.
 - Administrators can review or reject staff account requests and delete unnecessary daily reports. Account approvals, attendance, and report removals are auditable.
@@ -99,6 +101,8 @@ All routes except `POST /api/auth/login` require a bearer token.
 - `GET/POST /api/behaviour`
 - `GET /api/dashboard?date=YYYY-MM-DD`
 - `GET /api/public/classes`; `POST /api/auth/register` (teacher and class monitor account requests); `POST /api/auth/register/student` (student account request matched to an active student record)
+- Public website: `GET /api/public/news`; `POST /api/public/contact`
+- Administrator only: `POST/DELETE /api/admin/school-news`; `GET/PATCH/DELETE /api/admin/school-messages`
 - Teacher only: `GET/POST /api/teacher/assignments`; `DELETE /api/teacher/assignments/:id`
 - Administrator only: `GET /api/admin/teacher-assignments`; `PATCH /api/admin/teacher-assignments/:id/approval`; `PATCH /api/users/:id/status` (suspend/restore approved teacher accounts)
 - `GET/POST /api/reports`; Administrator only: `DELETE /api/reports/:id`

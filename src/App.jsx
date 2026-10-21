@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity, ArrowDownToLine, ArrowUpRight, Bell, BookOpen, CalendarDays, Code2,
-  Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, ClipboardCheck,
+  Camera, Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, ClipboardCheck,
   Clock3, Download, FileBarChart2, GraduationCap, LayoutDashboard, LockKeyhole, LogOut,
-  Mail, MapPin, Zap,
+  Mail, MapPin, Zap, Send,
   Menu, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, UserRound,
   Users, X, XCircle,
 } from 'lucide-react'
@@ -24,10 +24,12 @@ const navItems = [
   { label: 'Reports', icon: FileBarChart2 },
   { label: 'Daily Reports', icon: BookOpen },
   { label: 'Reports Inbox', icon: Bell },
+  { label: 'School News', icon: BookOpen },
   { label: 'Account Requests', icon: UserRound },
   { label: 'My Records', icon: CircleUserRound },
 ]
 const todayDate = new Date()
+const currentYear = todayDate.getFullYear()
 const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
 const todayLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()
 
@@ -91,6 +93,7 @@ function App() {
   const [dashboard, setDashboard] = useState(null)
   const [reportsData, setReportsData] = useState({ reports: [], attendance: [], messages: [] })
   const [pendingAccountRequests, setPendingAccountRequests] = useState(0)
+  const [unreadSchoolMessages, setUnreadSchoolMessages] = useState(0)
   const [search, setSearch] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [notice, setNotice] = useState('')
@@ -164,7 +167,11 @@ function App() {
     let cancelled = false
     const loadNotifications = () => {
       request('/admin/notifications', { token })
-        .then((data) => { if (!cancelled) setPendingAccountRequests(data.pendingAccountRequests) })
+        .then((data) => {
+          if (cancelled) return
+          setPendingAccountRequests(data.pendingAccountRequests)
+          setUnreadSchoolMessages(data.unreadSchoolMessages)
+        })
         .catch((requestError) => { if (!cancelled) setError(requestError.message) })
     }
     loadNotifications()
@@ -188,7 +195,7 @@ function App() {
       return ['Attendance', 'Daily Reports'].includes(label) && (label !== 'Attendance' || user?.role === 'Class Monitor')
     }
     if (user?.role === 'Administrator') return !['Daily Reports', 'My Records'].includes(label)
-    return !['Daily Reports', 'Reports Inbox'].includes(label)
+    return !['Daily Reports', 'Reports Inbox', 'School News'].includes(label)
   })
   const activePage = page === 'Overview' && user?.role === 'Class Monitor'
     ? 'Attendance'
@@ -241,6 +248,7 @@ function App() {
             <button key={label} className={`nav-link ${activePage === label || (label === 'Account Requests' && activePage === 'Settings') ? 'active' : ''}`} onClick={() => { setPage(label === 'Account Requests' ? 'Account Requests' : label); setMenuOpen(false) }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
               {label === 'Account Requests' && pendingAccountRequests > 0 && <span className="nav-count">{pendingAccountRequests}</span>}
+              {label === 'School News' && unreadSchoolMessages > 0 && <span className="nav-count">{unreadSchoolMessages}</span>}
               {label === 'Permissions' && permissions.filter((item) => item.status === 'Pending').length > 0 &&
                 <span className="nav-count">{permissions.filter((item) => item.status === 'Pending').length}</span>}
             </button>
@@ -278,6 +286,7 @@ function App() {
           {selectedPage === 'Reports' && <ReportsPage token={token} students={students} classes={schoolClasses} attendance={attendance} permissions={permissions} behaviour={behaviour} />}
           {selectedPage === 'Daily Reports' && <DailyReportsPage token={token} classes={schoolClasses} students={students} user={user} reports={reportsData.reports} onRefresh={refresh} notify={setNotice} reportError={setError} />}
           {selectedPage === 'Reports Inbox' && <ReportsInboxPage token={token} data={reportsData} onRefresh={refresh} reportError={setError} notify={setNotice} />}
+          {selectedPage === 'School News' && user?.role === 'Administrator' && <SchoolNewsAdminPage token={token} onUnreadCountChange={setUnreadSchoolMessages} reportError={setError} notify={setNotice} />}
           {selectedPage === 'My Records' && <MyRecordsPage token={token} user={user} reports={reportsData.reports} />}
           {selectedPage === 'Settings' && <SettingsPage token={token} user={user} classes={schoolClasses} onCreateClass={(body) => mutate('/classes', 'POST', body, 'School class added.')} onPendingAccountRequestsChange={setPendingAccountRequests} reportError={setError} notify={setNotice} />}
         </div>
@@ -288,47 +297,142 @@ function App() {
 }
 
 function WelcomePage({ onSignIn }) {
-  return <main className="welcome-page">
-    <header className="welcome-header">
-      <a className="welcome-brand" href="#top" aria-label="ESTG TSS home"><span><GraduationCap size={22} /></span><strong>ESTG TSS<small>Gisenyi · Rwanda</small></strong></a>
-      <nav aria-label="Main navigation"><a href="#about">About</a><a href="#programs">Trades</a><a href="#contact">Contact</a></nav>
-      <button className="primary-button" onClick={onSignIn}>Sign in <ArrowUpRight size={16} /></button>
+  const pageFromHash = () => window.location.hash.match(/^#\/([a-z-]+)/)?.[1] || 'home'
+  const [page, setPage] = useState(pageFromHash)
+  const [news, setNews] = useState([])
+  const [newsError, setNewsError] = useState('')
+  const [contactStatus, setContactStatus] = useState('')
+  const [contactError, setContactError] = useState('')
+  const [contactSending, setContactSending] = useState(false)
+  const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', subject: '', message: '' })
+  const [mobileOpen, setMobileOpen] = useState(false)
+  useEffect(() => {
+    const syncPage = () => { setPage(pageFromHash()); setMobileOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+    window.addEventListener('hashchange', syncPage)
+    return () => window.removeEventListener('hashchange', syncPage)
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    request('/public/news')
+      .then((data) => { if (!cancelled) setNews(data.news) })
+      .catch((error) => { if (!cancelled) setNewsError(error.message) })
+    return () => { cancelled = true }
+  }, [])
+  async function submitContact(event) {
+    event.preventDefault()
+    setContactSending(true)
+    setContactError('')
+    setContactStatus('')
+    try {
+      const result = await request('/public/contact', { method: 'POST', body: JSON.stringify(contactForm) })
+      setContactForm({ name: '', email: '', phone: '', subject: '', message: '' })
+      setContactStatus(result.message)
+    } catch (error) { setContactError(error.message) }
+    finally { setContactSending(false) }
+  }
+  const links = [
+    ['Home', 'home'], ['About us', 'about'], ['Trades', 'trades'], ['News', 'news'],
+    ['Gallery', 'gallery'], ['Student life', 'student-life'], ['Clubs', 'clubs'], ['Events', 'events'], ['Contact', 'contact'],
+  ]
+  const photos = [
+    { src: '/images/gallery-software.svg', label: 'Digital learning and collaboration', category: 'LEARNING' },
+    { src: '/images/gallery-electrical.svg', label: 'Technology in practice', category: 'PRACTICAL WORK' },
+    { src: '/images/gallery-team.svg', label: 'Teamwork and ideas', category: 'COMMUNITY' },
+    { src: '/images/gallery-electrical.svg', label: 'Exploring electrical systems', category: 'ELECTRICAL' },
+    { src: '/images/gallery-clubs.svg', label: 'A shared learning journey', category: 'SCHOOL LIFE' },
+    { src: '/images/gallery-events.svg', label: 'Students learning together', category: 'STUDENTS' },
+  ]
+  const pageDetails = {
+    about: ['About our school', 'A technical education shaped by curiosity, responsibility, and practical learning.'],
+    trades: ['Our technical trades', 'Explore Software Development and Electrical Technology across Levels 3–5.'],
+    news: ['News & announcements', 'Updates, achievements, and stories from the ESTG TSS community.'],
+    gallery: ['School gallery', 'A glimpse into learning, making, teamwork, and student life.'],
+    'student-life': ['Student life', 'Learning is only one part of the journey—community, creativity, and friendship matter too.'],
+    clubs: ['Clubs & activities', 'Find your people, share your interests, and make something together.'],
+    events: ['Events & school calendar', 'School activities bring our community together to learn, celebrate, and grow.'],
+    contact: ['Contact the school', 'Send a message to the school office or find another way to connect with us.'],
+  }
+  return <main className="public-site">
+    <div className="public-topline"><span>WELCOME TO ESTG TSS</span><span>Gisenyi, Rwanda · Technical learning for a changing world</span></div>
+    <header className="public-header">
+      <a className="public-brand" href="#/home" aria-label="ESTG TSS home"><span><GraduationCap size={23} /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a>
+      <button className="public-menu-toggle" aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}><Menu size={21} /></button>
+      <nav className={mobileOpen ? 'public-nav open' : 'public-nav'} aria-label="School website navigation">
+        {links.map(([label, id]) => <a key={id} className={page === id ? 'active' : ''} href={`#/${id}`}>{label}</a>)}
+        <button className="primary-button public-signin" onClick={onSignIn}>Portal sign in <ArrowUpRight size={15} /></button>
+      </nav>
     </header>
-    <section className="welcome-hero" id="top">
-      <div className="welcome-hero-copy">
-        <span className="welcome-kicker"><i /> LEARN · CREATE · BUILD</span>
-        <h1>Skills for a brighter, more connected future.</h1>
-        <p className="welcome-school-name">Ecole secondaire Technique de Gisenyi</p>
-        <p className="welcome-intro">A community where curious minds turn ideas into useful technology—from the first line of code to the circuits that power our world.</p>
-        <div className="welcome-hero-actions"><button className="primary-button" onClick={onSignIn}>Enter the school portal <ArrowUpRight size={17} /></button><a className="welcome-text-link" href="#programs">Explore our trades <ChevronDown size={16} /></a></div>
-        <div className="welcome-hero-note"><span><Code2 size={16} /> Software development</span><span><Zap size={16} /> Electrical technology</span></div>
+    {page === 'home' ? <section className="public-hero">
+      <div className="public-hero-photo" role="img" aria-label="Students collaborating in a bright learning space" />
+      <div className="public-hero-shade" />
+      <div className="public-hero-content">
+        <span className="public-eyebrow"><i /> WELCOME TO ESTG TSS</span>
+        <h1>Learn with purpose.<br /><em>Build what’s next.</em></h1>
+        <p className="public-full-name">Ecole secondaire Technique de Gisenyi</p>
+        <p className="public-hero-intro">Where young minds turn curiosity into skill—from developing thoughtful software to understanding the electrical systems that power our communities.</p>
+        <div className="public-hero-actions"><a className="public-light-cta" href="#/trades">Discover our trades <ArrowUpRight size={16} /></a><button className="public-ghost-cta" onClick={onSignIn}>School portal sign in</button></div>
+        <div className="public-hero-pill"><Code2 size={16} /> Software Development <span /> <Zap size={16} /> Electrical Technology</div>
       </div>
-      <div className="welcome-art" role="img" aria-label="Illustration of software code and electrical circuits">
-        <div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" />
-        <div className="art-board">
-          <div className="art-window-bar"><i /><i /><i /><span>ESTG · learn by doing</span></div>
-          <div className="art-code"><span>01</span><code><b>const</b> ideas = <em>"big"</em>;</code><span>02</span><code><b>build</b>(ideas, skills);</code><span>03</span><code><i>// make it real</i></code><strong>›</strong></div>
-          <div className="art-circuit"><span /><span /><span /><i /><i /><i /><b /></div>
-        </div>
-        <div className="art-float float-code"><Code2 size={18} /><span>Think<br /><strong>in code</strong></span></div>
-        <div className="art-float float-power"><Zap size={18} /><span>Build<br /><strong>with purpose</strong></span></div>
-        <div className="art-spark">✳</div>
+      <div className="public-hero-caption"><strong>Curiosity becomes capability.</strong><span>Gisenyi · Rwanda</span></div>
+    </section> : <section className={`public-page-banner page-banner-${page}`}>
+      <span className="public-eyebrow"><i /> ESTG TSS · Gisenyi, Rwanda</span>
+      <h1>{pageDetails[page]?.[0] || 'ESTG TSS'}</h1>
+      <p>{pageDetails[page]?.[1]}</p>
+    </section>}
+    {page === 'home' && <section className="public-intro-strip"><span>01 — OUR SCHOOL</span><p>Practical skills. Creative thinking. A future built together.</p><a href="#/about">Discover ESTG <ArrowUpRight size={15} /></a></section>}
+    {page === 'home' || page === 'about' ? <section className="public-section public-about">
+      <div className="public-section-heading"><span>ABOUT ESTG TSS</span><h2>Education that connects ideas to the real world.</h2></div>
+      <div className="public-about-copy"><p>Ecole secondaire Technique de Gisenyi is a technical secondary school in Gisenyi, Rwanda. We believe the best learning grows through curiosity, practice, teamwork, and the confidence to try.</p><p>From writing a first program to understanding a working circuit, our learners develop the knowledge and practical mindset to contribute to their communities and keep growing.</p><a href="#/student-life">Explore student life <ArrowUpRight size={15} /></a></div>
+    </section> : null}
+    {page === 'home' || page === 'trades' ? <section className="public-section public-trades">
+      <div className="public-section-heading"><span>LEARN BY DOING</span><h2>Technical pathways for a changing world.</h2><p>Build a strong foundation, develop practical skills, and keep asking what you can make better.</p></div>
+      <div className="public-trade-grid">
+        <article className="public-trade-card trade-software"><div className="public-trade-icon"><Code2 size={24} /></div><span>SOD · LEVELS 3–5</span><h3>Software Development</h3><p>Explore programming, web design, databases, and the thinking behind useful, accessible digital experiences.</p><a href="#/trades">Explore software development <ArrowUpRight size={15} /></a></article>
+        <article className="public-trade-card trade-electrical"><div className="public-trade-icon"><Zap size={24} /></div><span>ELET · LEVELS 3–5</span><h3>Electrical Technology</h3><p>Learn about electrical systems, circuits, safe practice, and the technologies that keep people and places connected.</p><a href="#/trades">Explore electrical technology <ArrowUpRight size={15} /></a></article>
       </div>
-    </section>
-    <section className="welcome-values" aria-label="Our approach"><div><strong>Curiosity</strong><span>Ask better questions</span></div><div><strong>Practical skills</strong><span>Learn by making</span></div><div><strong>Opportunity</strong><span>Prepare for what’s next</span></div></section>
-    <section className="welcome-section welcome-about" id="about">
-      <div className="welcome-section-title"><span>01 — ABOUT US</span><h2>Knowledge with a hands-on spirit.</h2></div>
-      <div className="welcome-about-copy"><p>Ecole secondaire Technique de Gisenyi (ESTG TSS) is a technical secondary school in Gisenyi, Rwanda. We bring classroom learning closer to the real challenges students will meet in technology and work.</p><p>Our goal is to help every learner grow in confidence, think creatively, work responsibly, and contribute to their community.</p><button className="welcome-inline-link" onClick={onSignIn}>Visit the school portal <ArrowUpRight size={15} /></button></div>
-    </section>
-    <section className="welcome-section welcome-programs" id="programs">
-      <div className="welcome-section-title"><span>02 — TECHNICAL TRADES</span><h2>Choose a path. Make an impact.</h2><p>Explore software and electrical technology through practical learning and problem-solving.</p></div>
-      <div className="welcome-program-grid">
-        <article className="welcome-program-card software-card"><div className="welcome-program-icon"><Code2 size={23} /></div><span className="welcome-program-label">SOD · LEVELS 3–5</span><h3>Software Development</h3><p>Explore programming, web experiences, databases, and the design thinking behind helpful digital tools.</p><div className="program-tags"><span>Write code</span><span>Design solutions</span><span>Build for people</span></div></article>
-        <article className="welcome-program-card electrical-card"><div className="welcome-program-icon"><Zap size={23} /></div><span className="welcome-program-label">ELET · LEVELS 3–5</span><h3>Electrical Technology</h3><p>Discover electrical systems, safe practical work, circuits, and the technology that keeps communities connected.</p><div className="program-tags"><span>Understand circuits</span><span>Work safely</span><span>Power ideas</span></div></article>
+    </section> : null}
+    {page === 'home' || page === 'news' ? <section className="public-section public-news">
+      <div className="public-section-title-row"><div className="public-section-heading"><span>FROM OUR COMMUNITY</span><h2>News & announcements</h2><p>Stories and updates shared by the school.</p></div>{page === 'home' && <a href="#/news">All school news <ArrowUpRight size={15} /></a>}</div>
+      {newsError ? <p className="public-inline-error" role="alert">{newsError}</p> : news.length ? <div className="public-news-grid">{(page === 'home' ? news.slice(0, 3) : news).map((item) => <article className="public-news-card" key={item.id}>{item.image_url && <img src={item.image_url} alt="" loading="lazy" />}<span>{new Date(item.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span><h3>{item.title}</h3><p>{item.summary}</p><details><summary>Read story</summary><p>{item.body}</p></details></article>)}</div> : <div className="public-empty-news"><BookOpen size={23} /><p>School news and announcements will appear here.</p></div>}
+    </section> : null}
+    {page === 'home' || page === 'gallery' ? <section className="public-section public-gallery">
+      <div className="public-section-title-row"><div className="public-section-heading"><span>OUR MOMENTS</span><h2>Learning, making, belonging.</h2><p>A gallery celebrating the ideas and energy of school life.</p></div>{page === 'home' && <a href="#/gallery">Explore gallery <ArrowUpRight size={15} /></a>}</div>
+      <div className="public-photo-grid">{(page === 'home' ? photos.slice(0, 4) : photos).map((photo, index) => <figure className={`public-photo photo-${index + 1}`} key={photo.src}><img src={photo.src} alt={photo.label} loading="lazy" /><figcaption><span>{photo.category}</span><strong>{photo.label}</strong></figcaption></figure>)}</div>
+      <p className="public-gallery-note">These original illustrations are temporary gallery artwork. School-owned photos can replace them when available.</p>
+    </section> : null}
+    {page === 'home' || page === 'student-life' || page === 'clubs' || page === 'events' ? <section className="public-section public-life">
+      <div className="public-section-heading"><span>BEYOND THE CLASSROOM</span><h2>Grow through every part of school life.</h2><p>Make friends, explore interests, and bring your ideas into the community.</p></div>
+      <div className="public-life-grid">
+        <article><div className="life-icon"><Users size={21} /></div><span>STUDENT COMMUNITY</span><h3>Life at ESTG</h3><p>Learning together, supporting one another, and celebrating the progress we make along the way.</p><a href="#/student-life">Student life <ArrowUpRight size={14} /></a></article>
+        <article><div className="life-icon"><Code2 size={21} /></div><span>INTERESTS & IDEAS</span><h3>Clubs</h3><p>Bring your interests together with others—share knowledge, make projects, and learn by doing.</p><a href="#/clubs">Explore clubs <ArrowUpRight size={14} /></a></article>
+        <article><div className="life-icon"><CalendarDays size={21} /></div><span>TOGETHER AT SCHOOL</span><h3>Events</h3><p>School gatherings, showcases, and community activities create moments to learn and connect.</p><a href="#/events">School events <ArrowUpRight size={14} /></a></article>
       </div>
-    </section>
-    <section className="welcome-callout"><div><span>THE NEXT BIG IDEA CAN START HERE.</span><h2>Learn something. Build something. Share it.</h2></div><button className="welcome-light-button" onClick={onSignIn}>Open ESTG TSS portal <ArrowUpRight size={16} /></button></section>
-    <footer className="welcome-footer" id="contact"><div className="footer-school"><span className="welcome-footer-mark"><GraduationCap size={19} /></span><div><strong>Ecole secondaire Technique de Gisenyi</strong><p>Practical learning for a changing world.</p></div></div><div className="footer-contact"><span><MapPin size={15} />Gisenyi, Rwanda</span><span><Mail size={15} />For enquiries, contact the school office.</span></div><span className="footer-copyright">ESTG TSS · Learn with purpose.</span></footer>
+    </section> : null}
+    {page === 'contact' ? <section className="public-section public-contact-section">
+      <div className="public-section-heading"><span>GET IN TOUCH</span><h2>We’d be glad to hear from you.</h2><p>Send a message to the school office. A school administrator can review it from the portal.</p>
+        <div className="contact-methods"><div><MapPin size={18} /><span><strong>Visit</strong><small>Gisenyi, Rwanda</small></span></div><div><Mail size={18} /><span><strong>Email</strong><small>Use the message form to contact the school office.</small></span></div><div><Camera size={18} /><span><strong>Social updates</strong><small>Follow official school channels when published.</small></span></div></div>
+        <div className="public-social-links"><a href="https://www.instagram.com/" target="_blank" rel="noreferrer"><Camera size={16} /> Instagram</a><a href="https://x.com/" target="_blank" rel="noreferrer"><span className="social-x-mark">𝕏</span> X</a></div>
+      </div>
+      <form className="public-contact-form" onSubmit={submitContact}>
+        <h3>Send us a message</h3>
+        <p>Your message will go to the school administrator.</p>
+        {contactStatus && <div className="contact-success" role="status">{contactStatus}</div>}
+        {contactError && <div className="form-error" role="alert">{contactError}</div>}
+        <div className="contact-form-grid"><label>Your name<input required maxLength="120" autoComplete="name" value={contactForm.name} onChange={(event) => setContactForm({ ...contactForm, name: event.target.value })} /></label><label>Email address<input required maxLength="254" type="email" autoComplete="email" value={contactForm.email} onChange={(event) => setContactForm({ ...contactForm, email: event.target.value })} /></label></div>
+        <label>Phone number <span>(optional)</span><input maxLength="40" type="tel" autoComplete="tel" value={contactForm.phone} onChange={(event) => setContactForm({ ...contactForm, phone: event.target.value })} /></label>
+        <label>Subject<input required maxLength="180" value={contactForm.subject} onChange={(event) => setContactForm({ ...contactForm, subject: event.target.value })} /></label>
+        <label>Your message<textarea required maxLength="5000" rows="5" value={contactForm.message} onChange={(event) => setContactForm({ ...contactForm, message: event.target.value })} /></label>
+        <button className="primary-button" disabled={contactSending}>{contactSending ? 'Sending message…' : 'Send message'} <Send size={15} /></button>
+      </form>
+    </section> : null}
+    <section className="public-bottom-cta"><div><span>ESTG TSS · GISENYI</span><h2>Come curious. Leave capable.</h2><p>Explore our technical trades and take the next step in your learning journey.</p></div><a href="#/trades">Explore the trades <ArrowUpRight size={16} /></a></section>
+    <footer className="public-footer">
+      <div className="public-footer-main"><a className="public-brand footer-brand" href="#/home"><span><GraduationCap size={22} /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a><p>Practical learning. Creative thinking.<br />A future built together.</p>      <div className="public-footer-social"><a href="https://www.instagram.com/" aria-label="Instagram" target="_blank" rel="noreferrer"><Camera size={17} /></a><a href="https://x.com/" aria-label="X" target="_blank" rel="noreferrer"><span className="social-x-mark">𝕏</span></a></div></div>
+      <div className="public-footer-col"><strong>Discover</strong><a href="#/about">About us</a><a href="#/trades">Our trades</a><a href="#/news">School news</a><a href="#/gallery">Gallery</a></div>
+      <div className="public-footer-col"><strong>School life</strong><a href="#/student-life">Student life</a><a href="#/clubs">Clubs</a><a href="#/events">Events</a><a href="#/contact">Contact us</a></div>
+      <div className="public-footer-col"><strong>Connect</strong><span><MapPin size={14} />Gisenyi, Rwanda</span><button onClick={onSignIn}>Staff & student portal <ArrowUpRight size={14} /></button><a href="#/contact">Send the school a message</a></div>
+      <div className="public-footer-bottom"><span>© {currentYear} Ecole secondaire Technique de Gisenyi. All rights reserved.</span><a href="#/home">Back to top ↑</a></div>
+    </footer>
   </main>
 }
 
@@ -979,6 +1083,87 @@ function ReportsInboxPage({ token, data, onRefresh, reportError, notify }) {
     <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Guardian message outbox</h2><p>Permission approvals create Kinyarwanda messages. They are not sent by SMS until an SMS service is configured.</p></div></div>
       <div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>GUARDIAN NUMBER</th><th>KINYARWANDA MESSAGE</th><th>CREATED</th></tr></thead><tbody>{data.messages.map((message) => <tr key={message.id}><td>{message.student_name}</td><td>{message.recipient}</td><td>{message.message}</td><td>{formatDateTime(message.created_at)}</td></tr>)}</tbody></table></div>
       {!data.messages.length && <EmptyState message="No guardian messages are waiting in the outbox." />}
+    </section>
+  </>
+}
+
+function SchoolNewsAdminPage({ token, onUnreadCountChange, reportError, notify }) {
+  const [news, setNews] = useState([])
+  const [messages, setMessages] = useState([])
+  const [form, setForm] = useState({ title: '', summary: '', body: '', imageUrl: '' })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      request('/public/news'),
+      request('/admin/school-messages', { token }),
+    ]).then(([newsData, messageData]) => {
+      if (cancelled) return
+      setNews(newsData.news)
+      setMessages(messageData.messages)
+      onUnreadCountChange(messageData.messages.filter((message) => message.status === 'New').length)
+    }).catch((error) => { if (!cancelled) reportError(error.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [onUnreadCountChange, reportError, token])
+  async function publishNews(event) {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      await request('/admin/school-news', { token, method: 'POST', body: JSON.stringify(form) })
+      const data = await request('/public/news')
+      setNews(data.news)
+      setForm({ title: '', summary: '', body: '', imageUrl: '' })
+      notify('News article published on the school website.')
+    } catch (error) { reportError(error.message) }
+    finally { setSaving(false) }
+  }
+  async function removeNews(article) {
+    if (!window.confirm(`Delete “${article.title}” from the public website?`)) return
+    try {
+      await request(`/admin/school-news/${article.id}`, { token, method: 'DELETE' })
+      setNews((current) => current.filter((item) => item.id !== article.id))
+      notify('News article removed.')
+    } catch (error) { reportError(error.message) }
+  }
+  async function updateMessage(message, status) {
+    try {
+      await request(`/admin/school-messages/${message.id}`, { token, method: 'PATCH', body: JSON.stringify({ status }) })
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, status } : item))
+      if (message.status !== status) {
+        onUnreadCountChange((count) => Math.max(0, count + (status === 'New' ? 1 : -1)))
+      }
+      notify(status === 'Read' ? 'Message marked as read.' : 'Message marked as new.')
+    } catch (error) { reportError(error.message) }
+  }
+  async function removeMessage(message) {
+    if (!window.confirm(`Delete the message from ${message.name}?`)) return
+    try {
+      await request(`/admin/school-messages/${message.id}`, { token, method: 'DELETE' })
+      setMessages((current) => current.filter((item) => item.id !== message.id))
+      if (message.status === 'New') onUnreadCountChange((count) => Math.max(0, count - 1))
+      notify('Contact message deleted.')
+    } catch (error) { reportError(error.message) }
+  }
+  return <>
+    <PageHeading eyebrow="PUBLIC WEBSITE" title="News & contact messages" description="Publish school updates for the public website and manage messages sent through Contact us." />
+    <section className="panel settings-card public-news-admin-form"><h2>Publish a school news article</h2><p>Published articles appear in the public News section.</p>
+      <form className="modal-form" onSubmit={publishNews}>
+        <label>Headline<input required maxLength="180" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>Short summary<input required maxLength="500" value={form.summary} onChange={(event) => setForm({ ...form, summary: event.target.value })} /></label>
+        <label>Full article<textarea required maxLength="10000" rows="6" value={form.body} onChange={(event) => setForm({ ...form, body: event.target.value })} /></label>
+        <label>Photo URL <span className="field-hint">(optional; use an HTTPS image URL)</span><input type="url" value={form.imageUrl} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://…" /></label>
+        <div className="modal-actions"><button className="primary-button" disabled={saving}>{saving ? 'Publishing…' : 'Publish news article'} <ArrowUpRight size={15} /></button></div>
+      </form>
+    </section>
+    <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>Published news</h2><p>{news.length} articles on the public website.</p></div></div>
+      {loading ? <div className="report-loading">Loading news and messages…</div> : <div className="table-scroll"><table><thead><tr><th>HEADLINE</th><th>SUMMARY</th><th>PUBLISHED</th><th>ACTION</th></tr></thead><tbody>{news.map((item) => <tr key={item.id}><td><strong>{item.title}</strong></td><td>{item.summary}</td><td>{formatDateTime(item.published_at)}</td><td><button className="secondary-button" onClick={() => void removeNews(item)}>Delete</button></td></tr>)}</tbody></table></div>}
+      {!news.length && !loading && <EmptyState message="No news published yet." />}
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Messages from Contact us</h2><p>Reply by email or phone, then mark each message as read.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>FROM</th><th>CONTACT</th><th>SUBJECT & MESSAGE</th><th>RECEIVED</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>{messages.map((message) => <tr key={message.id}><td><strong>{message.name}</strong></td><td><a href={`mailto:${encodeURIComponent(message.email)}?subject=${encodeURIComponent(`Re: ${message.subject}`)}`}>{message.email}</a>{message.phone && <small className="sub-cell">{message.phone}</small>}</td><td><strong>{message.subject}</strong><p>{message.message}</p></td><td>{formatDateTime(message.created_at)}</td><td><StatusBadge status={message.status} /></td><td><div className="approval-actions">{message.status === 'New' && <button className="primary-button" onClick={() => void updateMessage(message, 'Read')}>Mark read</button>}<button className="secondary-button" onClick={() => void removeMessage(message)}>Delete</button></div></td></tr>)}</tbody></table></div>
+      {!messages.length && <EmptyState message="No contact messages have been received." />}
     </section>
   </>
 }

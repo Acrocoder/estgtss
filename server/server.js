@@ -102,6 +102,28 @@ async function initializeDatabase() {
       CONSTRAINT fk_teacher_subject_class FOREIGN KEY (class_id) REFERENCES classes(id),
       INDEX idx_teacher_subject_teacher (teacher_id, class_id)
     ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS school_news (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(180) NOT NULL,
+      summary VARCHAR(500) NOT NULL,
+      body TEXT NOT NULL,
+      image_url VARCHAR(1000) NULL,
+      author_id BIGINT UNSIGNED NOT NULL,
+      published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_school_news_author FOREIGN KEY (author_id) REFERENCES users(id),
+      INDEX idx_school_news_published (published_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS contact_messages (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      email VARCHAR(254) NOT NULL,
+      phone VARCHAR(40) NULL,
+      subject VARCHAR(180) NOT NULL,
+      message TEXT NOT NULL,
+      status ENUM('New','Read') NOT NULL DEFAULT 'New',
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_contact_message_status_date (status, created_at)
+    ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS students (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       student_number VARCHAR(60) NOT NULL UNIQUE,
@@ -543,6 +565,86 @@ app.get('/api/public/classes', async (_req, res, next) => {
   try {
     const [classes] = await pool.query('SELECT id, level, trade, class_name FROM classes ORDER BY level, trade, class_name')
     return res.json({ classes })
+  } catch (error) { return next(error) }
+})
+
+app.get('/api/public/news', async (_req, res, next) => {
+  try {
+    const [news] = await pool.query(
+      `SELECT id, title, summary, body, image_url, published_at
+       FROM school_news ORDER BY published_at DESC LIMIT 30`,
+    )
+    return res.json({ news })
+  } catch (error) { return next(error) }
+})
+
+app.post('/api/public/contact', async (req, res, next) => {
+  try {
+    const { name, email, phone, subject, message } = req.body || {}
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 120 ||
+        typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254 ||
+        (phone !== undefined && (typeof phone !== 'string' || phone.trim().length > 40)) ||
+        typeof subject !== 'string' || !subject.trim() || subject.trim().length > 180 ||
+        typeof message !== 'string' || !message.trim() || message.trim().length > 5000) {
+      throw inputError('Enter your name, a valid email, a subject, and a message under 5,000 characters.')
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO contact_messages (name, email, phone, subject, message) VALUES (?, ?, ?, ?, ?)',
+      [name.trim(), email.trim(), phone?.trim() || null, subject.trim(), message.trim()],
+    )
+    return res.status(201).json({ id: result.insertId, message: 'Thank you. Your message has been sent to the school.' })
+  } catch (error) { return next(error) }
+})
+
+app.get('/api/admin/school-messages', authenticate, requireRole('Administrator'), async (_req, res, next) => {
+  try {
+    const [messages] = await pool.query(
+      'SELECT id, name, email, phone, subject, message, status, created_at FROM contact_messages ORDER BY (status=\'New\') DESC, created_at DESC LIMIT 300',
+    )
+    return res.json({ messages })
+  } catch (error) { return next(error) }
+})
+
+app.patch('/api/admin/school-messages/:id', authenticate, requireRole('Administrator'), async (req, res, next) => {
+  try {
+    const { status } = req.body || {}
+    if (!['New', 'Read'].includes(status)) throw inputError('Choose New or Read.')
+    const [result] = await pool.execute('UPDATE contact_messages SET status=? WHERE id=?', [status, req.params.id])
+    if (!result.affectedRows) return res.status(404).json({ error: 'School message not found.' })
+    return res.json({ success: true })
+  } catch (error) { return next(error) }
+})
+
+app.delete('/api/admin/school-messages/:id', authenticate, requireRole('Administrator'), async (req, res, next) => {
+  try {
+    const [result] = await pool.execute('DELETE FROM contact_messages WHERE id=?', [req.params.id])
+    if (!result.affectedRows) return res.status(404).json({ error: 'School message not found.' })
+    return res.json({ success: true })
+  } catch (error) { return next(error) }
+})
+
+app.post('/api/admin/school-news', authenticate, requireRole('Administrator'), async (req, res, next) => {
+  try {
+    const { title, summary, body, imageUrl } = req.body || {}
+    if (typeof title !== 'string' || !title.trim() || title.trim().length > 180 ||
+        typeof summary !== 'string' || !summary.trim() || summary.trim().length > 500 ||
+        typeof body !== 'string' || !body.trim() || body.trim().length > 10000 ||
+        (imageUrl !== undefined && imageUrl !== '' && (typeof imageUrl !== 'string' || imageUrl.length > 1000 || !/^https:\/\/\S+$/i.test(imageUrl)))) {
+      throw inputError('Enter a title (180 characters), summary (500 characters), story, and an optional HTTPS image URL.')
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO school_news (title, summary, body, image_url, author_id) VALUES (?, ?, ?, ?, ?)',
+      [title.trim(), summary.trim(), body.trim(), imageUrl?.trim() || null, req.user.id],
+    )
+    return res.status(201).json({ id: result.insertId })
+  } catch (error) { return next(error) }
+})
+
+app.delete('/api/admin/school-news/:id', authenticate, requireRole('Administrator'), async (req, res, next) => {
+  try {
+    const [result] = await pool.execute('DELETE FROM school_news WHERE id=?', [req.params.id])
+    if (!result.affectedRows) return res.status(404).json({ error: 'News article not found.' })
+    return res.json({ success: true })
   } catch (error) { return next(error) }
 })
 
@@ -1270,7 +1372,11 @@ app.get('/api/admin/notifications', authenticate, requireRole('Administrator'), 
       `SELECT COUNT(*) AS count FROM users
        WHERE approval_status='Pending' AND role IN ('Class Monitor','Teacher','Student')`,
     )
-    return res.json({ pendingAccountRequests: Number(pending.count) })
+    const [[messages]] = await pool.query("SELECT COUNT(*) AS count FROM contact_messages WHERE status='New'")
+    return res.json({
+      pendingAccountRequests: Number(pending.count),
+      unreadSchoolMessages: Number(messages.count),
+    })
   } catch (error) { return next(error) }
 })
 
