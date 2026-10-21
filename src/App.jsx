@@ -23,6 +23,8 @@ const navItems = [
   { label: 'Reports', icon: FileBarChart2 },
   { label: 'Daily Reports', icon: BookOpen },
   { label: 'Reports Inbox', icon: Bell },
+  { label: 'Account Requests', icon: UserRound },
+  { label: 'My Records', icon: CircleUserRound },
 ]
 const todayDate = new Date()
 const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
@@ -86,6 +88,7 @@ function App() {
   const [behaviour, setBehaviour] = useState([])
   const [dashboard, setDashboard] = useState(null)
   const [reportsData, setReportsData] = useState({ reports: [], attendance: [], messages: [] })
+  const [pendingAccountRequests, setPendingAccountRequests] = useState(0)
   const [search, setSearch] = useState('')
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [notice, setNotice] = useState('')
@@ -105,7 +108,7 @@ function App() {
         request(`/attendance?date=${today}`, { token }),
         request('/permissions', { token }),
         request('/behaviour', { token }),
-        ['Class Monitor', 'Teacher'].includes(role) ? Promise.resolve(null) : request(`/dashboard?date=${today}`, { token }),
+        ['Class Monitor', 'Teacher', 'Student'].includes(role) ? Promise.resolve(null) : request(`/dashboard?date=${today}`, { token }),
         request('/reports', { token }),
       ])
       setUser(me.user)
@@ -135,11 +138,22 @@ function App() {
     return () => window.clearTimeout(timeout)
   }, [refresh])
   useEffect(() => {
+    if (user?.role !== 'Administrator') return undefined
+    let cancelled = false
+    const loadNotifications = () => {
+      request('/admin/notifications', { token })
+        .then((data) => { if (!cancelled) setPendingAccountRequests(data.pendingAccountRequests) })
+        .catch((requestError) => { if (!cancelled) setError(requestError.message) })
+    }
+    loadNotifications()
+    const interval = window.setInterval(loadNotifications, 30000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [token, user?.role])
+  useEffect(() => {
     if (!notice && !error) return undefined
     const timeout = window.setTimeout(() => { setNotice(''); setError('') }, 4200)
     return () => window.clearTimeout(timeout)
   }, [notice, error])
-
   const filteredStudents = useMemo(() => {
     const query = search.trim().toLowerCase()
     return query ? students.filter((student) =>
@@ -147,17 +161,28 @@ function App() {
     ) : students
   }, [search, students])
   const visibleNavItems = navItems.filter(({ label }) => {
+    if (user?.role === 'Student') return label === 'My Records'
     if (['Class Monitor', 'Teacher'].includes(user?.role)) {
       return ['Attendance', 'Daily Reports'].includes(label) && (label !== 'Attendance' || user?.role === 'Class Monitor')
     }
-    if (user?.role === 'Administrator') return label !== 'Daily Reports'
+    if (user?.role === 'Administrator') return !['Daily Reports', 'My Records'].includes(label)
     return !['Daily Reports', 'Reports Inbox'].includes(label)
   })
   const activePage = page === 'Overview' && user?.role === 'Class Monitor'
     ? 'Attendance'
     : page === 'Overview' && user?.role === 'Teacher'
       ? 'Daily Reports'
-      : page
+      : page === 'Overview' && user?.role === 'Student'
+        ? 'My Records'
+        : page
+  const selectedPage = activePage === 'Account Requests' ? 'Settings' : activePage
+  useEffect(() => {
+    if (activePage !== 'Account Requests') return undefined
+    const timeout = window.setTimeout(() => {
+      document.getElementById('account-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [activePage])
 
   async function mutate(path, method, body, success) {
     try {
@@ -189,8 +214,9 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav>
           {visibleNavItems.map(({ label, icon: Icon }) => (
-            <button key={label} className={`nav-link ${activePage === label ? 'active' : ''}`} onClick={() => { setPage(label); setMenuOpen(false) }}>
+            <button key={label} className={`nav-link ${activePage === label || (label === 'Account Requests' && activePage === 'Settings') ? 'active' : ''}`} onClick={() => { setPage(label === 'Account Requests' ? 'Account Requests' : label); setMenuOpen(false) }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
+              {label === 'Account Requests' && pendingAccountRequests > 0 && <span className="nav-count">{pendingAccountRequests}</span>}
               {label === 'Permissions' && permissions.filter((item) => item.status === 'Pending').length > 0 &&
                 <span className="nav-count">{permissions.filter((item) => item.status === 'Pending').length}</span>}
             </button>
@@ -212,7 +238,7 @@ function App() {
           <div className="breadcrumb">ESTG TSS <ChevronRight size={15} /> <strong>{activePage}</strong></div>
           <div className="top-actions">
             <div className="global-search-wrap"><label className="global-search"><Search size={17} /><input placeholder="Search students..." value={search} onChange={(event) => setSearch(event.target.value)} /></label>{search.trim() && <div className="global-results" role="listbox">{filteredStudents.slice(0, 6).map((student) => <button key={student.id} role="option" onClick={() => { setSelectedStudentId(student.id); setSearch('') }}><span className="avatar">{student.full_name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{student.full_name}</strong><small>{student.student_number} · {student.level} · {student.trade} {student.class_name}</small></span></button>)}{!filteredStudents.length && <p>No matching students.</p>}</div>}</div>
-            <button className="icon-button notification-button" aria-label="Notifications"><Bell size={18} /><i /></button>
+            <button className="icon-button notification-button" aria-label={pendingAccountRequests ? `${pendingAccountRequests} account requests need review` : 'Notifications'} onClick={() => { if (user?.role === 'Administrator') setPage('Account Requests') }}><Bell size={18} />{user?.role === 'Administrator' && pendingAccountRequests > 0 && <i />}</button>
             <div className="top-user"><div className="avatar">{user?.name?.[0] || 'P'}</div><span>{user?.name || 'Patron'}<small>{user?.role || 'Staff'}</small></span><ChevronDown size={15} /></div>
           </div>
         </header>
@@ -220,15 +246,16 @@ function App() {
           {error && <div className="toast error-toast" role="alert"><XCircle size={18} />{error}<button onClick={() => setError('')}><X size={16} /></button></div>}
           {notice && <div className="toast success-toast" role="status"><Check size={18} />{notice}<button onClick={() => setNotice('')}><X size={16} /></button></div>}
           {busy && <div className="loading-line" />}
-          {activePage === 'Overview' && <Dashboard dashboard={dashboard} students={students} attendance={attendance} permissions={permissions} behaviour={behaviour} setPage={setPage} />}
-          {activePage === 'Students' && <StudentsPage students={filteredStudents} classes={schoolClasses} onOpenProfile={setSelectedStudentId} readOnly={user?.role === 'Read-only Staff'} onCreate={(body) => mutate('/students', 'POST', body, 'Student registered successfully.')} onUpdate={(id, body) => mutate(`/students/${id}`, 'PATCH', body, 'Student details updated.')} />}
-          {activePage === 'Attendance' && <AttendancePage token={token} students={students} classes={schoolClasses} permissions={permissions} readOnly={user?.role === 'Read-only Staff'} user={user} onSaved={refresh} notify={setNotice} reportError={setError} />}
-          {activePage === 'Permissions' && <PermissionsPage token={token} students={students} classes={schoolClasses} permissions={permissions} onRefresh={refresh} notify={setNotice} reportError={setError} user={user} />}
-          {activePage === 'Behaviour' && <BehaviourPage students={students} records={behaviour} onCreate={(body) => mutate('/behaviour', 'POST', body, 'Behaviour record saved.')} readOnly={user?.role === 'Read-only Staff'} />}
-          {activePage === 'Reports' && <ReportsPage token={token} students={students} classes={schoolClasses} attendance={attendance} permissions={permissions} behaviour={behaviour} />}
-          {activePage === 'Daily Reports' && <DailyReportsPage token={token} classes={schoolClasses} students={students} user={user} reports={reportsData.reports} onRefresh={refresh} notify={setNotice} reportError={setError} />}
-          {activePage === 'Reports Inbox' && <ReportsInboxPage token={token} data={reportsData} onRefresh={refresh} reportError={setError} notify={setNotice} />}
-          {activePage === 'Settings' && <SettingsPage token={token} user={user} classes={schoolClasses} onCreateClass={(body) => mutate('/classes', 'POST', body, 'School class added.')} reportError={setError} notify={setNotice} />}
+          {selectedPage === 'Overview' && <Dashboard dashboard={dashboard} students={students} attendance={attendance} permissions={permissions} behaviour={behaviour} setPage={setPage} />}
+          {selectedPage === 'Students' && <StudentsPage students={filteredStudents} classes={schoolClasses} onOpenProfile={setSelectedStudentId} readOnly={user?.role === 'Read-only Staff'} onCreate={(body) => mutate('/students', 'POST', body, 'Student registered successfully.')} onUpdate={(id, body) => mutate(`/students/${id}`, 'PATCH', body, 'Student details updated.')} />}
+          {selectedPage === 'Attendance' && <AttendancePage token={token} students={students} classes={schoolClasses} permissions={permissions} readOnly={user?.role === 'Read-only Staff'} user={user} onSaved={refresh} notify={setNotice} reportError={setError} />}
+          {selectedPage === 'Permissions' && <PermissionsPage token={token} students={students} classes={schoolClasses} permissions={permissions} onRefresh={refresh} notify={setNotice} reportError={setError} user={user} />}
+          {selectedPage === 'Behaviour' && <BehaviourPage students={students} records={behaviour} onCreate={(body) => mutate('/behaviour', 'POST', body, 'Behaviour record saved.')} readOnly={user?.role === 'Read-only Staff'} />}
+          {selectedPage === 'Reports' && <ReportsPage token={token} students={students} classes={schoolClasses} attendance={attendance} permissions={permissions} behaviour={behaviour} />}
+          {selectedPage === 'Daily Reports' && <DailyReportsPage token={token} classes={schoolClasses} students={students} user={user} reports={reportsData.reports} onRefresh={refresh} notify={setNotice} reportError={setError} />}
+          {selectedPage === 'Reports Inbox' && <ReportsInboxPage token={token} data={reportsData} onRefresh={refresh} reportError={setError} notify={setNotice} />}
+          {selectedPage === 'My Records' && <MyRecordsPage token={token} user={user} reports={reportsData.reports} />}
+          {selectedPage === 'Settings' && <SettingsPage token={token} user={user} classes={schoolClasses} onCreateClass={(body) => mutate('/classes', 'POST', body, 'School class added.')} onPendingAccountRequestsChange={setPendingAccountRequests} reportError={setError} notify={setNotice} />}
         </div>
       </main>
       {selectedStudentId && <StudentProfile token={token} studentId={selectedStudentId} onClose={() => setSelectedStudentId(null)} />}
@@ -240,8 +267,8 @@ function Login({ onLogin }) {
   const [mode, setMode] = useState('login')
   const [username, setUsername] = useState('')
   const [name, setName] = useState('')
+  const [studentNumber, setStudentNumber] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState('Class Monitor')
   const [classes, setClasses] = useState([])
   const [classId, setClassId] = useState('')
   const [classMistressName, setClassMistressName] = useState('')
@@ -249,6 +276,7 @@ function Login({ onLogin }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  const isSignup = mode !== 'login'
   useEffect(() => {
     request('/public/classes')
       .then((data) => setClasses(data.classes))
@@ -260,16 +288,25 @@ function Login({ onLogin }) {
     setError('')
     setSuccess('')
     try {
-      if (mode === 'login') {
+      if (!isSignup) {
         const result = await request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
         onLogin(result.token)
+      } else if (mode === 'student') {
+        const result = await request('/auth/register/student', {
+          method: 'POST',
+          body: JSON.stringify({ studentNumber, name, password }),
+        })
+        setSuccess(result.message)
+        setMode('login')
+        setUsername(studentNumber)
+        setPassword('')
       } else {
         const selectedClass = classes.find((item) => String(item.id) === classId)
         if (!selectedClass) throw new Error('Select your level, trade, and class.')
         const result = await request('/auth/register', {
           method: 'POST',
           body: JSON.stringify({
-            username, name, password, role, level: selectedClass.level,
+            username, name, password, role: mode === 'teacher' ? 'Teacher' : 'Class Monitor', level: selectedClass.level,
             trade: selectedClass.trade, className: selectedClass.class_name,
             classMistressName, subject,
           }),
@@ -289,26 +326,29 @@ function Login({ onLogin }) {
       <div className="login-card">
         <div className="login-logo"><GraduationCap size={27} /></div>
         <p className="eyebrow">ESTG TSS · SCHOOL PATRON</p>
-        <h1>{mode === 'login' ? 'Welcome back' : 'Request a staff account'}</h1>
-        <p className="login-subtitle">{mode === 'login' ? 'Sign in to manage your school community.' : 'New accounts need administrator approval before sign-in.'}</p>
+        <h1>{!isSignup ? 'Welcome back' : `Request a ${mode === 'student' ? 'student' : mode === 'teacher' ? 'teacher' : 'class monitor'} account`}</h1>
+        <p className="login-subtitle">{!isSignup ? 'Sign in to access your school account.' : 'The administrator must approve your request before you can sign in.'}</p>
         {error && <div className="form-error" role="alert">{error}</div>}
         {success && <div className="registration-success" role="status">{success}</div>}
         <form onSubmit={submit}>
-          {mode === 'register' && <>
-            <label>Full name<input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
-            <label>Account type<select value={role} onChange={(event) => setRole(event.target.value)}><option>Class Monitor</option><option>Teacher</option></select></label>
+          {isSignup && <>
+            <label>Full name{mode === 'student' && <span className="form-note">Enter the name as it appears in the school register.</span>}<input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
           </>}
-          <label>Email / username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Email or username" /></label>
-          {mode === 'register' && <>
+          {mode === 'student'
+            ? <label>Student ID<input required autoComplete="username" value={studentNumber} onChange={(event) => setStudentNumber(event.target.value)} placeholder="Your registered school ID" /></label>
+            : <label>Email / username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Email or username" /></label>}
+          {(mode === 'teacher' || mode === 'monitor') && <>
             <label>Level, trade, and class<select required value={classId} onChange={(event) => setClassId(event.target.value)}><option value="">Select your class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.level} · {item.trade} · {item.class_name}</option>)}</select></label>
-            {role === 'Class Monitor' && <label>Class mistress name<input required value={classMistressName} onChange={(event) => setClassMistressName(event.target.value)} /></label>}
-            {role === 'Teacher' && <label>Subject taught<input required value={subject} onChange={(event) => setSubject(event.target.value)} /></label>}
+            {mode === 'monitor' && <label>Class mistress name<input required value={classMistressName} onChange={(event) => setClassMistressName(event.target.value)} /></label>}
+            {mode === 'teacher' && <label>Subject taught<input required value={subject} onChange={(event) => setSubject(event.target.value)} /></label>}
           </>}
-          <label>Password<input required minLength={mode === 'register' ? 12 : undefined} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === 'login' ? 'Enter your password' : 'At least 12 characters'} /></label>
-          <button className="primary-button full-button" disabled={loading}>{loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Send approval request'}<ArrowUpRight size={17} /></button>
+          <label>Password<input required minLength={isSignup ? 12 : undefined} type="password" autoComplete={isSignup ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={isSignup ? 'At least 12 characters' : 'Enter your password'} /></label>
+          <button className="primary-button full-button" disabled={loading}>{loading ? 'Please wait...' : isSignup ? 'Send approval request' : 'Sign in'}<ArrowUpRight size={17} /></button>
         </form>
-        <button className="text-button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setSuccess('') }}>{mode === 'login' ? 'Teacher or class monitor? Request an account' : 'Already have an account? Sign in'}</button>
-        {mode === 'login' && <p className="login-footnote">Use the administrator account configured for this installation.</p>}
+        {isSignup
+          ? <button className="text-button" onClick={() => { setMode('login'); setError(''); setSuccess('') }}>Back to sign in</button>
+          : <div className="signup-options"><p>Request a separate account as:</p><button className="text-button" onClick={() => { setMode('teacher'); setError(''); setSuccess('') }}>Teacher</button><button className="text-button" onClick={() => { setMode('monitor'); setError(''); setSuccess('') }}>Class monitor</button><button className="text-button" onClick={() => { setMode('student'); setError(''); setSuccess('') }}>Student</button></div>}
+        {!isSignup && <p className="login-footnote">Teacher, monitor, and student requests need administrator approval.</p>}
       </div>
       <div className="login-decoration"><span>01 / SCHOOL LIFE</span><strong>Every student<br />seen. Every day.</strong><p>A calmer way to keep track of the moments that matter.</p><div className="decoration-line" /></div>
     </main>
@@ -398,6 +438,49 @@ function StudentProfile({ token, studentId, onClose }) {
       </div>
     </>}
   </Modal>
+}
+
+function MyRecordsPage({ token, user, reports }) {
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    request(`/students/${user.student_id}/profile`, { token })
+      .then((data) => { if (!cancelled) setProfile(data) })
+      .catch((requestError) => { if (!cancelled) setError(requestError.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [token, user.student_id])
+  const myReports = reports.filter((report) => Number(report.student_id) === Number(user.student_id))
+  if (loading) return <><PageHeading eyebrow="STUDENT ACCOUNT" title="My records" description="Your attendance, permission history, and reports." /><EmptyState message="Loading your student records..." /></>
+  if (error) return <><PageHeading eyebrow="STUDENT ACCOUNT" title="My records" description="Your attendance, permission history, and reports." /><div className="profile-error" role="alert">{error}</div></>
+  if (!profile) return null
+  const { student } = profile
+  return <>
+    <PageHeading eyebrow="STUDENT ACCOUNT" title="My records" description="Only you can see the student records linked to your account." />
+    <section className="panel settings-card"><h2>{student.full_name}</h2><p>{student.student_number} · {student.level} · {student.trade} · {student.class_name}</p><div className="metric-grid student-metrics">
+      <article className="metric-card"><p>Attendance records</p><strong>{profile.attendance.length}</strong></article>
+      <article className="metric-card"><p>Permission requests</p><strong>{profile.permissions.length}</strong></article>
+      <article className="metric-card"><p>Behaviour points</p><strong>{student.points}</strong></article>
+    </div></section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Attendance</h2><p>Your recent attendance marks.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE</th><th>STATUS</th></tr></thead><tbody>{profile.attendance.map((row) => <tr key={`${row.date}-${row.status}`}><td>{String(row.date).slice(0, 10)}</td><td><StatusBadge status={row.status} /></td></tr>)}</tbody></table></div>
+      {!profile.attendance.length && <EmptyState message="No attendance records are available." />}
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Permission requests</h2><p>Requests and decisions linked to your student record.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>REASON</th><th>DEPARTURE</th><th>EXPECTED RETURN</th><th>STATUS</th></tr></thead><tbody>{profile.permissions.map((item) => <tr key={item.id}><td>{item.reason}</td><td>{formatDateTime(item.departure_at)}</td><td>{formatDateTime(item.expected_return_at)}</td><td><StatusBadge status={item.status} /></td></tr>)}</tbody></table></div>
+      {!profile.permissions.length && <EmptyState message="No permission requests are available." />}
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Reports about you</h2><p>Teacher notes shared with the administrator.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE</th><th>SUBJECT</th><th>LESSONS</th><th>NOTE</th></tr></thead><tbody>{myReports.map((report) => <tr key={report.id}><td>{String(report.report_date).slice(0, 10)}</td><td>{report.subject}</td><td>{report.lessons}</td><td>{report.behaviour_notes || '—'}</td></tr>)}</tbody></table></div>
+      {!myReports.length && <EmptyState message="No reports are linked to your account." />}
+    </section>
+    <section className="panel table-panel inbox-section"><div className="table-toolbar"><div><h2>Behaviour</h2><p>Your recorded behaviour points and incidents.</p></div></div>
+      <div className="table-scroll"><table><thead><tr><th>DATE</th><th>TYPE</th><th>CATEGORY</th><th>DETAILS</th><th>POINTS</th></tr></thead><tbody>{profile.behaviour.map((item) => <tr key={`${item.kind}-${item.id}`}><td>{formatDateTime(item.created_at)}</td><td>{item.kind}</td><td>{item.category}</td><td>{item.description}</td><td>{item.points > 0 ? '+' : ''}{item.points}</td></tr>)}</tbody></table></div>
+      {!profile.behaviour.length && <EmptyState message="No behaviour records are available." />}
+    </section>
+  </>
 }
 
 function StudentsPage({ students, classes, readOnly, onOpenProfile, onCreate, onUpdate }) {
@@ -764,7 +847,7 @@ function ReportsInboxPage({ token, data, onRefresh, reportError, notify }) {
   </>
 }
 
-function SettingsPage({ token, user, classes, onCreateClass, reportError, notify }) {
+function SettingsPage({ token, user, classes, onCreateClass, onPendingAccountRequestsChange, reportError, notify }) {
   const [users, setUsers] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [showClassForm, setShowClassForm] = useState(false)
@@ -796,6 +879,8 @@ function SettingsPage({ token, user, classes, onCreateClass, reportError, notify
       await request(`/users/${id}/approval`, { token, method: 'PATCH', body: JSON.stringify({ status }) })
       const data = await request('/users', { token })
       setUsers(data.users)
+      const notifications = await request('/admin/notifications', { token })
+      onPendingAccountRequestsChange(notifications.pendingAccountRequests)
       notify(`Account request ${status.toLowerCase()}.`)
     } catch (error) { reportError(error.message) }
   }
@@ -827,7 +912,7 @@ function SettingsPage({ token, user, classes, onCreateClass, reportError, notify
   return <>
     <PageHeading eyebrow="PREFERENCES" title="Settings" description="School structure and account access for this workspace." />
     <div className="settings-grid"><section className="panel settings-card"><div className="settings-card-heading"><div className="settings-icon"><GraduationCap size={20} /></div>{user?.role === 'Administrator' && <button className="secondary-button" onClick={() => setShowClassForm(true)}><Plus size={14} />Add class</button>}</div><h2>School structure</h2><p>Student classes are filtered by level and trade throughout the system.</p><div className="structure-list">{levels.map((level) => <div key={level}><strong>{level}</strong><span>{trades.map((trade) => `${trade} · ${classes.filter((item) => item.level === level && item.trade === trade).map((item) => item.class_name).join(', ') || 'No classes'}`).join('  |  ')}</span></div>)}</div><small className="settings-note">{user?.role === 'Administrator' ? 'Add a class to update student registration and attendance options.' : 'School structure changes are managed by your system administrator.'}</small></section><section className="panel settings-card"><div className="settings-icon green"><UserRound size={20} /></div><h2>Your account</h2><p>Signed in identity and permissions for this session.</p><div className="account-detail"><span>Name</span><strong>{user?.name}</strong></div><div className="account-detail"><span>Username</span><strong>{user?.username}</strong></div><div className="account-detail"><span>Role</span><strong><StatusBadge status={user?.role} /></strong></div><div className="access-note"><ShieldCheck size={16} />Permission approval is restricted to authorized approvers and administrators.</div></section><section className="panel settings-card"><div className="settings-icon green"><LockKeyhole size={20} /></div><h2>Change password</h2><p>Choose a new password with at least 12 characters. Your current password is required to confirm this change.</p>{passwordError && <div className="form-error" role="alert">{passwordError}</div>}<form className="settings-password-form" onSubmit={changePassword}><label>Current password<input required type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label><label>New password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label><label>Confirm new password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label><button className="primary-button"><LockKeyhole size={15} />Update password</button></form></section></div>
-    {user?.role === 'Administrator' && <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>User management</h2><p>Review teacher and class monitor requests before granting access.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME</th><th>ROLE</th><th>CLASS / DETAILS</th><th>APPROVAL</th><th>ADDED</th><th>ACTION</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.username}</td><td><StatusBadge status={account.role} /></td><td>{account.level ? `${account.level} · ${account.trade} · ${account.class_name}` : '—'}{account.subject ? ` · ${account.subject}` : ''}{account.class_mistress_name ? ` · Mistress: ${account.class_mistress_name}` : ''}</td><td><StatusBadge status={account.approval_status} /></td><td>{new Date(account.created_at).toLocaleDateString()}</td><td>{account.approval_status === 'Pending' && <div className="approval-actions"><button className="primary-button" onClick={() => reviewAccount(account.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewAccount(account.id, 'Rejected')}>Reject</button></div>}</td></tr>)}</tbody></table></div></section>}
+    {user?.role === 'Administrator' && <section className="panel table-panel user-management" id="account-requests"><div className="table-toolbar"><div><h2>Account requests {users.filter((account) => account.approval_status === 'Pending').length > 0 && <span className="request-count">{users.filter((account) => account.approval_status === 'Pending').length} pending</span>}</h2><p>Teacher, class monitor, and student signups arrive here. Approve or reject each request.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add staff user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME / STUDENT ID</th><th>ACCOUNT TYPE</th><th>CLASS / DETAILS</th><th>APPROVAL</th><th>ADDED</th><th>ACTION</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.linked_student_number || account.username}</td><td><StatusBadge status={account.role} /></td><td>{account.linked_student_number ? 'Student ID matched to school register' : account.level ? `${account.level} · ${account.trade} · ${account.class_name}` : '—'}{account.subject ? ` · ${account.subject}` : ''}{account.class_mistress_name ? ` · Mistress: ${account.class_mistress_name}` : ''}</td><td><StatusBadge status={account.approval_status} /></td><td>{new Date(account.created_at).toLocaleDateString()}</td><td>{account.approval_status === 'Pending' && <div className="approval-actions"><button className="primary-button" onClick={() => reviewAccount(account.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewAccount(account.id, 'Rejected')}>Reject</button></div>}</td></tr>)}</tbody></table></div>{!users.length && <EmptyState message="No account requests or staff accounts yet." />}</section>}
     {showForm && <Modal title="Create user account" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={createUser}><label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Username<input required autoComplete="off" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><div className="field-grid two"><label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option>Patron</option><option>Authorized Approver</option><option>Read-only Staff</option><option>Administrator</option></select></label><label>Password (12+ characters)<input required minLength="12" type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Create account</button></div></form></Modal>}
     {showClassForm && <Modal title="Add a school class" onClose={() => setShowClassForm(false)}><form className="modal-form" onSubmit={createClass}><div className="field-grid two"><label>Level<select value={classForm.level} onChange={(event) => setClassForm({ ...classForm, level: event.target.value })}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label><label>Trade<select value={classForm.trade} onChange={(event) => setClassForm({ ...classForm, trade: event.target.value })}>{trades.map((trade) => <option key={trade}>{trade}</option>)}</select></label></div><label>Class name<input required pattern="Class [A-Z]" title="Use a name such as Class C" value={classForm.className} onChange={(event) => setClassForm({ ...classForm, className: event.target.value })} placeholder="Class C" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowClassForm(false)}>Cancel</button><button className="primary-button">Add class</button></div></form></Modal>}
   </>

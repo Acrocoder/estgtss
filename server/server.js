@@ -4,6 +4,7 @@ import cors from 'cors'
 import mysql from 'mysql2/promise'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import nodemailer from 'nodemailer'
 
 const port = Number(process.env.PORT || 4000)
 const jwtSecret = process.env.JWT_SECRET
@@ -58,7 +59,7 @@ app.get('/api', (_req, res) => {
   })
 })
 const validStatuses = ['Present', 'Absent', 'Late', 'Authorized Away', 'Not Marked']
-const validRoles = ['Administrator', 'Patron', 'Authorized Approver', 'Read-only Staff', 'Class Monitor', 'Teacher']
+const validRoles = ['Administrator', 'Patron', 'Authorized Approver', 'Read-only Staff', 'Class Monitor', 'Teacher', 'Student']
 const classStructure = [
   ['Level 3', 'SOD', 'Class A'], ['Level 3', 'SOD', 'Class B'], ['Level 3', 'ELET', 'Class A'],
   ['Level 4', 'SOD', 'Class A'], ['Level 4', 'SOD', 'Class B'], ['Level 4', 'ELET', 'Class A'],
@@ -72,11 +73,13 @@ async function initializeDatabase() {
       username VARCHAR(80) NOT NULL UNIQUE,
       name VARCHAR(160) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
-      role ENUM('Administrator','Patron','Authorized Approver','Read-only Staff','Class Monitor','Teacher') NOT NULL DEFAULT 'Patron',
+      role ENUM('Administrator','Patron','Authorized Approver','Read-only Staff','Class Monitor','Teacher','Student') NOT NULL DEFAULT 'Patron',
       approval_status ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Approved',
       class_id BIGINT UNSIGNED NULL,
+      student_id BIGINT UNSIGNED NULL,
       class_mistress_name VARCHAR(160) NULL,
       subject VARCHAR(120) NULL,
+      UNIQUE KEY uq_user_student (student_id),
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB`,
     `CREATE TABLE IF NOT EXISTS classes (
@@ -214,15 +217,22 @@ async function initializeDatabase() {
     ) ENGINE=InnoDB`,
   ]
   for (const statement of statements) await pool.query(statement)
-  await pool.query("ALTER TABLE users MODIFY role ENUM('Administrator','Patron','Authorized Approver','Read-only Staff','Class Monitor','Teacher') NOT NULL DEFAULT 'Patron'")
+  await pool.query("ALTER TABLE users MODIFY role ENUM('Administrator','Patron','Authorized Approver','Read-only Staff','Class Monitor','Teacher','Student') NOT NULL DEFAULT 'Patron'")
   const [userColumns] = await pool.query('SHOW COLUMNS FROM users')
   const existingUserColumns = new Set(userColumns.map((column) => column.Field))
   if (!existingUserColumns.has('approval_status')) {
     await pool.query("ALTER TABLE users ADD COLUMN approval_status ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Approved'")
   }
   if (!existingUserColumns.has('class_id')) await pool.query('ALTER TABLE users ADD COLUMN class_id BIGINT UNSIGNED NULL')
+  if (!existingUserColumns.has('student_id')) {
+    await pool.query('ALTER TABLE users ADD COLUMN student_id BIGINT UNSIGNED NULL')
+  }
   if (!existingUserColumns.has('class_mistress_name')) await pool.query('ALTER TABLE users ADD COLUMN class_mistress_name VARCHAR(160) NULL')
   if (!existingUserColumns.has('subject')) await pool.query('ALTER TABLE users ADD COLUMN subject VARCHAR(120) NULL')
+  const [userIndexes] = await pool.query('SHOW INDEX FROM users')
+  if (!userIndexes.some((index) => index.Key_name === 'uq_user_student')) {
+    await pool.query('ALTER TABLE users ADD UNIQUE KEY uq_user_student (student_id)')
+  }
   const [attendanceColumns] = await pool.query('SHOW COLUMNS FROM attendance_sessions')
   const existingAttendanceColumns = new Set(attendanceColumns.map((column) => column.Field))
   if (!existingAttendanceColumns.has('attended_by')) {
@@ -283,7 +293,7 @@ function requireRole(...roles) {
 }
 
 function requireWrite(req, res, next) {
-  if (['Read-only Staff', 'Class Monitor', 'Teacher'].includes(req.user.role)) {
+  if (['Read-only Staff', 'Class Monitor', 'Teacher', 'Student'].includes(req.user.role)) {
     return res.status(403).json({ error: 'This account cannot change this type of record.' })
   }
   return next()
@@ -306,6 +316,10 @@ async function audit(connection, userId, action, entity, entityId, reason, previ
     'INSERT INTO audit_logs (user_id, action, entity, entity_id, reason, previous_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [userId, action, entity, entityId || null, reason || null, previousValue ? JSON.stringify(previousValue) : null, newValue ? JSON.stringify(newValue) : null],
   )
+  if (req.user.role === 'Student' &&
+      (!records.length || Number(records[0].student_id) !== Number(req.user.student_id))) {
+    return res.status(403).json({ error: 'You can only access your own permission records.' })
+  }
 }
 
 async function getClass(level, trade, className) {
@@ -313,17 +327,55 @@ async function getClass(level, trade, className) {
   return rows[0]?.id
 }
 
+async function emailAdministratorOfSignup(account, classLabel) {
+  const host = process.env.SMTP_HOST
+  const username = process.env.SMTP_USER
+  const password = process.env.SMTP_PASSWORD
+  const recipient = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_USERNAME
+  const port = Number(process.env.SMTP_PORT || 587)
+  if (!host || !username || !password || !recipient) {
+    return { sent: false, message: 'The request is waiting for approval. The administrator will see it in the app; email alerts are not configured yet.' }
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { sent: false, message: 'The request is waiting for approval. Email alert configuration has an invalid SMTP port; the administrator can still review it in the app.' }
+  }
+  try {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: process.env.SMTP_SECURE === 'true' || port === 465,
+      auth: { user: username, pass: password },
+    })
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || username,
+      to: recipient,
+      subject: `Account approval request: ${account.role}`,
+      text: [
+        `A new ${account.role.toLowerCase()} account is waiting for your approval.`,
+        `Name: ${account.name}`,
+        `Username / student ID: ${account.username}`,
+        classLabel ? `Class: ${classLabel}` : '',
+        'Sign in to ESTG TSS and open Account Requests to approve or reject this request.',
+      ].filter(Boolean).join('\n'),
+    })
+    return { sent: true, message: 'Your request was sent, and the administrator was notified by email.' }
+  } catch (error) {
+    console.error('Account request email notification failed:', error.message)
+    return { sent: false, message: 'Your request was saved and is visible to the administrator in the app, but the email alert could not be delivered.' }
+  }
+}
+
 app.post('/api/auth/login', async (req, res, next) => {
   try {
     const { username, password } = req.body || {}
     if (!username || !password) throw inputError('Enter your username and password.')
-    const [rows] = await pool.execute('SELECT id, username, name, password_hash, role, approval_status, class_id, class_mistress_name, subject FROM users WHERE username = ?', [username])
+    const [rows] = await pool.execute('SELECT id, username, name, password_hash, role, approval_status, class_id, student_id, class_mistress_name, subject FROM users WHERE username = ?', [username])
     if (!rows.length || !(await bcrypt.compare(password, rows[0].password_hash))) return res.status(401).json({ error: 'Incorrect username or password.' })
     const { password_hash: _, ...user } = rows[0]
     if (user.approval_status !== 'Approved') {
       return res.status(403).json({ error: user.approval_status === 'Rejected' ? 'This account request was not approved. Contact the administrator.' : 'Your account is waiting for administrator approval.' })
     }
-    const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role, class_id: user.class_id }, jwtSecret, { expiresIn: '12h' })
+    const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role, class_id: user.class_id, student_id: user.student_id }, jwtSecret, { expiresIn: '12h' })
     return res.json({ token, user })
   } catch (error) { return next(error) }
 })
@@ -340,12 +392,58 @@ app.post('/api/auth/register', async (req, res, next) => {
     const classId = await getClass(level, trade, className)
     if (!classId) throw inputError('That class is not configured.')
     const passwordHash = await bcrypt.hash(password, 12)
-    await pool.execute(
+    const [result] = await pool.execute(
       `INSERT INTO users (username, name, password_hash, role, approval_status, class_id, class_mistress_name, subject)
        VALUES (?, ?, ?, ?, 'Pending', ?, ?, ?)`,
       [username.trim(), name.trim(), passwordHash, role, classId, role === 'Class Monitor' ? classMistressName.trim() : null, role === 'Teacher' ? subject.trim() : null],
     )
-    return res.status(201).json({ status: 'Pending', message: 'Your account request was sent to the administrator for approval.' })
+    const notification = await emailAdministratorOfSignup(
+      { role, name: name.trim(), username: username.trim() },
+      `${level} · ${trade} · ${className}`,
+    )
+    return res.status(201).json({ status: 'Pending', id: result.insertId, ...notification })
+  } catch (error) { return next(error) }
+})
+
+app.post('/api/auth/register/student', async (req, res, next) => {
+  try {
+    const { studentNumber, name, password } = req.body || {}
+    if (!studentNumber?.trim() || !name?.trim() || typeof password !== 'string' || password.length < 12) {
+      throw inputError('Enter your student ID and registered full name, and choose a password of at least 12 characters.')
+    }
+    const connection = await pool.getConnection()
+    let student
+    try {
+      await connection.beginTransaction()
+      const [students] = await connection.execute(
+        `SELECT s.id, s.student_number, s.full_name, s.class_id, c.level, c.trade, c.class_name
+         FROM students s JOIN classes c ON c.id=s.class_id
+         WHERE s.student_number=? AND LOWER(TRIM(s.full_name))=LOWER(TRIM(?)) AND s.status='Active'
+         FOR UPDATE`,
+        [studentNumber.trim(), name.trim()],
+      )
+      if (!students.length) throw inputError('We could not match that student ID and name to an active student record. Ask the school administrator to check your details.')
+      student = students[0]
+      const [existing] = await connection.execute('SELECT id FROM users WHERE student_id=? OR username=?', [student.id, student.student_number])
+      if (existing.length) throw inputError('An account request already exists for this student record.')
+      const passwordHash = await bcrypt.hash(password, 12)
+      const [result] = await connection.execute(
+        `INSERT INTO users (username, name, password_hash, role, approval_status, class_id, student_id)
+         VALUES (?, ?, ?, 'Student', 'Pending', ?, ?)`,
+        [student.student_number, student.full_name, passwordHash, student.class_id, student.id],
+      )
+      await connection.commit()
+      const notification = await emailAdministratorOfSignup(
+        { role: 'Student', name: student.full_name, username: student.student_number },
+        `${student.level} · ${student.trade} · ${student.class_name}`,
+      )
+      return res.status(201).json({ status: 'Pending', id: result.insertId, ...notification })
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
   } catch (error) { return next(error) }
 })
 
@@ -383,7 +481,7 @@ app.post('/api/auth/change-password', authenticate, async (req, res, next) => {
 
 app.get('/api/auth/me', authenticate, async (req, res, next) => {
   try {
-    const [rows] = await pool.execute('SELECT id, username, name, role, approval_status, class_id, class_mistress_name, subject FROM users WHERE id = ?', [req.user.id])
+    const [rows] = await pool.execute('SELECT id, username, name, role, approval_status, class_id, student_id, class_mistress_name, subject FROM users WHERE id = ?', [req.user.id])
     if (!rows.length) return res.status(401).json({ error: 'This account is no longer available.' })
     return res.json({ user: rows[0] })
   } catch (error) { return next(error) }
@@ -393,9 +491,9 @@ app.get('/api/classes', authenticate, async (_req, res, next) => {
   try {
     const [classes] = await pool.execute(
       `SELECT id, level, trade, class_name FROM classes
-       ${_req.user.role === 'Class Monitor' || _req.user.role === 'Teacher' ? 'WHERE id = ?' : ''}
+       ${['Class Monitor', 'Teacher', 'Student'].includes(_req.user.role) ? 'WHERE id = ?' : ''}
        ORDER BY level, trade, class_name`,
-      _req.user.role === 'Class Monitor' || _req.user.role === 'Teacher' ? [_req.user.class_id] : [],
+      ['Class Monitor', 'Teacher', 'Student'].includes(_req.user.role) ? [_req.user.class_id] : [],
     )
     return res.json({ classes })
   } catch (error) { return next(error) }
@@ -430,6 +528,11 @@ app.get('/api/students', authenticate, async (req, res, next) => {
   try {
     const conditions = []
     const params = []
+    if (req.user.role === 'Student') {
+      if (!req.user.student_id) return res.status(403).json({ error: 'This student account is not linked to a student record.' })
+      conditions.push('s.id = ?')
+      params.push(req.user.student_id)
+    }
     if (['Class Monitor', 'Teacher'].includes(req.user.role)) {
       conditions.push('s.class_id = ?')
       params.push(req.user.class_id)
@@ -443,7 +546,9 @@ app.get('/api/students', authenticate, async (req, res, next) => {
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
     const [students] = await pool.execute(
-      `SELECT s.id, s.student_number, s.full_name, s.gender, s.student_type, s.residence_type, s.guardian_contact, s.status, s.registered_at, c.level, c.trade, c.class_name,
+      `SELECT s.id, s.student_number, s.full_name, s.gender, s.student_type, s.residence_type,
+        ${req.user.role === 'Student' ? 'NULL' : 's.guardian_contact'} AS guardian_contact,
+        s.status, s.registered_at, c.level, c.trade, c.class_name,
         COALESCE((SELECT SUM(bt.points) FROM behaviour_transactions bt WHERE bt.student_id = s.id), 0) AS points
        FROM students s JOIN classes c ON c.id = s.class_id ${where} ORDER BY s.full_name`,
       params,
@@ -504,8 +609,12 @@ app.patch('/api/students/:id', authenticate, requireWrite, async (req, res, next
 
 app.get('/api/students/:id/profile', authenticate, async (req, res, next) => {
   try {
+    if (req.user.role === 'Student' && Number(req.params.id) !== Number(req.user.student_id)) {
+      return res.status(403).json({ error: 'You can only view your own student profile.' })
+    }
     const [studentRows] = await pool.execute(
-      `SELECT s.id, s.class_id, s.student_number, s.full_name, s.gender, s.student_type, s.residence_type, s.guardian_contact, s.status, s.registered_at,
+      `SELECT s.id, s.class_id, s.student_number, s.full_name, s.gender, s.student_type, s.residence_type,
+       ${req.user.role === 'Student' ? 'NULL' : 's.guardian_contact'} AS guardian_contact, s.status, s.registered_at,
        c.level, c.trade, c.class_name,
        COALESCE((SELECT SUM(points) FROM behaviour_transactions WHERE student_id=s.id), 0) AS points
        FROM students s JOIN classes c ON c.id=s.class_id WHERE s.id=?`,
@@ -569,6 +678,10 @@ app.get('/api/attendance', authenticate, async (req, res, next) => {
       conditions.push('ss.class_id = ?')
       params.push(req.user.class_id)
     }
+    if (req.user.role === 'Student') {
+      conditions.push('ar.student_id = ?')
+      params.push(req.user.student_id)
+    }
     const [records] = await pool.execute(
       `SELECT ar.id, s.id AS student_id, s.student_number, s.full_name, c.level, c.trade, c.class_name,
        ss.session_date AS date, ss.saved_at, saver.name AS saved_by, ss.attended_by, ss.submitted_to_admin,
@@ -584,8 +697,8 @@ app.get('/api/attendance', authenticate, async (req, res, next) => {
       const [sessions] = await pool.execute(
         `SELECT ss.session_date AS date, ss.saved_at, u.name AS saved_by, ss.attended_by, ss.submitted_to_admin
          FROM attendance_sessions ss JOIN classes c ON c.id=ss.class_id JOIN users u ON u.id=ss.saved_by
-         WHERE ss.session_date=? AND c.level=? AND c.trade=? AND c.class_name=? ${['Class Monitor', 'Teacher'].includes(req.user.role) ? 'AND ss.class_id=?' : ''}`,
-        ['Class Monitor', 'Teacher'].includes(req.user.role)
+         WHERE ss.session_date=? AND c.level=? AND c.trade=? AND c.class_name=? ${['Class Monitor', 'Teacher', 'Student'].includes(req.user.role) ? 'AND ss.class_id=?' : ''}`,
+        ['Class Monitor', 'Teacher', 'Student'].includes(req.user.role)
           ? [req.query.date, req.query.level, req.query.trade, req.query.class, req.user.class_id]
           : [req.query.date, req.query.level, req.query.trade, req.query.class],
       )
@@ -664,6 +777,10 @@ app.get('/api/permissions', authenticate, async (req, res, next) => {
       conditions.push('s.class_id=?')
       params.push(req.user.class_id)
     }
+    if (req.user.role === 'Student') {
+      conditions.push('p.student_id=?')
+      params.push(req.user.student_id)
+    }
     const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
     const [permissions] = await pool.execute(
       `SELECT p.id, p.student_id, s.student_number, s.full_name, c.level, c.trade, c.class_name, p.departure_at, p.expected_return_at,
@@ -691,6 +808,10 @@ app.get('/api/permissions/:id', authenticate, async (req, res, next) => {
        LEFT JOIN users approver ON approver.id=p.approved_by WHERE p.id=?`,
       [req.params.id],
     )
+    if (req.user.role === 'Student' &&
+        (!records.length || Number(records[0].student_id) !== Number(req.user.student_id))) {
+      return res.status(403).json({ error: 'You can only access your own permission records.' })
+    }
     if (['Class Monitor', 'Teacher'].includes(req.user.role) &&
         records[0] && Number(records[0].class_id) !== Number(req.user.class_id)) {
       return res.status(403).json({ error: 'You can only access permission records for your assigned class.' })
@@ -791,8 +912,13 @@ app.post('/api/permissions/:id/:action', authenticate, requireWrite, async (req,
 
 app.get('/api/behaviour', authenticate, async (_req, res, next) => {
   try {
-    const studentScope = ['Class Monitor', 'Teacher'].includes(_req.user.role) ? 'AND s.class_id = ?' : ''
-    const scopeParams = ['Class Monitor', 'Teacher'].includes(_req.user.role) ? [_req.user.class_id] : []
+    const isStudent = _req.user.role === 'Student'
+    const studentScope = isStudent
+      ? 'AND s.id = ?'
+      : ['Class Monitor', 'Teacher'].includes(_req.user.role) ? 'AND s.class_id = ?' : ''
+    const scopeParams = isStudent
+      ? [_req.user.student_id]
+      : ['Class Monitor', 'Teacher'].includes(_req.user.role) ? [_req.user.class_id] : []
     const [transactions] = await pool.query(
       `SELECT bt.id, bt.student_id, s.student_number, s.full_name, c.level, c.trade, c.class_name, 'Positive' AS kind,
        bt.points, bt.category, bt.description, u.name AS recorded_by, bt.created_at, NULL AS severity, NULL AS action_taken
@@ -848,11 +974,12 @@ app.post('/api/behaviour', authenticate, requireWrite, async (req, res, next) =>
 app.get('/api/reports', authenticate, async (req, res, next) => {
   try {
     const isAdmin = req.user.role === 'Administrator'
-    if (!isAdmin && !['Class Monitor', 'Teacher'].includes(req.user.role)) {
+    const isStudent = req.user.role === 'Student'
+    if (!isAdmin && !isStudent && !['Class Monitor', 'Teacher'].includes(req.user.role)) {
       return res.json({ reports: [], attendance: [], messages: [] })
     }
-    const scope = isAdmin ? '' : 'WHERE dr.class_id = ?'
-    const params = isAdmin ? [] : [req.user.class_id]
+    const scope = isAdmin ? '' : isStudent ? 'WHERE dr.student_id = ?' : 'WHERE dr.class_id = ?'
+    const params = isAdmin ? [] : isStudent ? [req.user.student_id] : [req.user.class_id]
     const [reports] = await pool.execute(
       `SELECT dr.id, dr.report_date, dr.report_type, dr.subject, dr.lessons, dr.behaviour_notes,
        dr.student_id, s.full_name AS student_name, c.level, c.trade, c.class_name,
@@ -981,10 +1108,23 @@ app.get('/api/users', authenticate, requireRole('Administrator'), async (_req, r
   try {
     const [users] = await pool.query(
       `SELECT u.id, u.username, u.name, u.role, u.approval_status, u.class_mistress_name,
-       u.subject, u.created_at, c.level, c.trade, c.class_name
-       FROM users u LEFT JOIN classes c ON c.id=u.class_id ORDER BY u.created_at DESC`,
+       u.subject, u.student_id, s.student_number AS linked_student_number,
+       u.created_at, c.level, c.trade, c.class_name
+       FROM users u LEFT JOIN classes c ON c.id=u.class_id
+       LEFT JOIN students s ON s.id=u.student_id
+       ORDER BY (u.approval_status='Pending') DESC, u.created_at DESC`,
     )
     return res.json({ users, roles: validRoles })
+  } catch (error) { return next(error) }
+})
+
+app.get('/api/admin/notifications', authenticate, requireRole('Administrator'), async (_req, res, next) => {
+  try {
+    const [[pending]] = await pool.query(
+      `SELECT COUNT(*) AS count FROM users
+       WHERE approval_status='Pending' AND role IN ('Class Monitor','Teacher','Student')`,
+    )
+    return res.json({ pendingAccountRequests: Number(pending.count) })
   } catch (error) { return next(error) }
 })
 
@@ -993,7 +1133,7 @@ app.patch('/api/users/:id/approval', authenticate, requireRole('Administrator'),
     const { status } = req.body || {}
     if (!['Approved', 'Rejected'].includes(status)) throw inputError('Choose Approved or Rejected.')
     const [result] = await pool.execute(
-      `UPDATE users SET approval_status=? WHERE id=? AND role IN ('Class Monitor','Teacher')`,
+      `UPDATE users SET approval_status=? WHERE id=? AND role IN ('Class Monitor','Teacher','Student') AND approval_status='Pending'`,
       [status, req.params.id],
     )
     if (!result.affectedRows) return res.status(404).json({ error: 'Pending staff account not found.' })
@@ -1011,7 +1151,7 @@ app.post('/api/users', authenticate, requireRole('Administrator'), async (req, r
   try {
     const { username, name, password, role } = req.body || {}
     if (!username?.trim() || !name?.trim() || !password || password.length < 12 ||
-        !validRoles.includes(role) || ['Class Monitor', 'Teacher'].includes(role)) {
+        !validRoles.includes(role) || ['Class Monitor', 'Teacher', 'Student'].includes(role)) {
       throw inputError('Provide a username, name, valid role, and a password of at least 12 characters.')
     }
     const hash = await bcrypt.hash(password, 12)

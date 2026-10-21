@@ -16,6 +16,10 @@ A React and Express application for student registration, daily attendance, stud
 5. Start the React app in a second terminal with `npm run dev`.
 6. Open the URL printed by Vite and sign in with `ADMIN_USERNAME` and `ADMIN_PASSWORD` from `.env`.
 
+Teachers, class monitors, and students use separate **Request account** options on the sign-in screen. Student registration matches the student ID and full name against an active school record; teacher and monitor requests include class details. All three account types need administrator approval before they can sign in. Requests appear in the administrator's **Account Requests** page with Approve and Reject actions. Students can view only their own linked records.
+
+In-app notifications are available to administrators. To also email the administrator when a request arrives, configure the SMTP settings below on the API host. Never commit real SMTP credentials. Until SMTP is configured, requests are still saved and visible in the administrator's account request list.
+
 ## Install as a mobile app
 
 The Vite build produces an installable PWA named **ETG TSS**. The install banner appears only when the browser offers installation; on iPhone and iPad it provides Safari **Share → Add to Home Screen** steps. The app shell and static assets are precached. Authenticated API calls, records, and credentials are not cached, so attendance and other live data require the API, MySQL, and a network connection.
@@ -55,6 +59,9 @@ The first server start creates the schema, seeds the currently configured level/
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Optional first-run bootstrap administrator |
 | `RESET_ADMIN_PASSWORD` | Set to `true` temporarily to reset the configured bootstrap administrator's password at startup |
 | `VITE_API_URL` | API base URL for the frontend (default `https://estgtss-api.onrender.com/api`) |
+| `ADMIN_NOTIFICATION_EMAIL` | Administrator email for new account-request alerts (defaults to `ADMIN_USERNAME`) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | SMTP server host, port (default `587`), and TLS mode (`true` to force TLS; port `465` uses TLS automatically) |
+| `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | SMTP authentication and optional sender address; keep credentials private on the API host |
 
 `server/server.js` contains the idempotent schema bootstrap. Back up the MySQL database regularly and use TLS and restricted database/network access for deployment. This local starter does not configure automated backups or production hosting.
 
@@ -68,8 +75,9 @@ The first server start creates the schema, seeds the currently configured level/
 - Permission requests with role-restricted approval/rejection and recorded departure/return actions. Permission rows open the full request details and audit history, including actual return time.
 - Behaviour awards and incident deductions with reasons and staff attribution.
 - Attendance date-range reports, permission and behaviour views with CSV export and print support.
-- Administrator, Patron, Authorized Approver, and Read-only Staff roles. Student/attendance/permission/behaviour write endpoints reject read-only accounts.
-- Teachers and class monitors can request accounts with their assigned class; an administrator must approve each request before sign-in is enabled. Monitor requests include the class mistress's name.
+- Administrator, Patron, Authorized Approver, Read-only Staff, Teacher, Class Monitor, and Student roles. Student/attendance/permission/behaviour write endpoints reject read-only accounts.
+- Separate teacher, class monitor, and student account requests; student accounts must match an active registered student ID and name. Administrator notifications, email alerts (when SMTP is configured), and Approve/Reject actions manage pending requests.
+- Teachers and class monitors request accounts with their assigned class; monitor requests include the class mistress's name. Student accounts are limited to their own linked attendance, permission, behaviour, and report records.
 - Class monitors record attendance as themselves or the class mistress and can explicitly submit the register to the administrator. Teachers and monitors submit daily subject/lesson reports; teachers can refer student behaviour concerns to the administrator.
 - Permission approval creates a Kinyarwanda guardian message in the administrator's outbox when a guardian phone number is registered. The message is queued for review only; sending SMS requires a configured SMS gateway and credentials.
 - Administrators can review or reject staff account requests and delete unnecessary daily reports. Account approvals, attendance, and report removals are auditable.
@@ -88,9 +96,9 @@ All routes except `POST /api/auth/login` require a bearer token.
 - `GET/POST /api/permissions`; `POST /api/permissions/:id/{approve,reject,depart,return}`
 - `GET/POST /api/behaviour`
 - `GET /api/dashboard?date=YYYY-MM-DD`
-- `GET /api/public/classes`; `POST /api/auth/register` (teacher and class monitor account requests)
+- `GET /api/public/classes`; `POST /api/auth/register` (teacher and class monitor account requests); `POST /api/auth/register/student` (student account request matched to an active student record)
 - `GET/POST /api/reports`; Administrator only: `DELETE /api/reports/:id`
-- Administrator only: `GET/POST /api/users`; `PATCH /api/users/:id/approval`
+- Administrator only: `GET/POST /api/users`; `GET /api/admin/notifications`; `PATCH /api/users/:id/approval`
 
 ## Validation
 
