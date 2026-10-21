@@ -5,8 +5,14 @@ import mysql from 'mysql2/promise'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import nodemailer from 'nodemailer'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 
 const port = Number(process.env.PORT || 4000)
+const serverDirectory = path.dirname(fileURLToPath(import.meta.url))
+const newsMediaDirectory = path.resolve(process.env.NEWS_MEDIA_DIR || path.join(serverDirectory, 'uploads', 'news'))
 const jwtSecret = process.env.JWT_SECRET
 if (!jwtSecret || jwtSecret.length < 32) {
   throw new Error('JWT_SECRET must be configured with at least 32 characters.')
@@ -59,7 +65,7 @@ app.get('/api', (_req, res) => {
   })
 })
 const validStatuses = ['Present', 'Absent', 'Late', 'Authorized Away', 'Not Marked']
-const validRoles = ['Administrator', 'Patron', 'Authorized Approver', 'Read-only Staff', 'Class Monitor', 'Teacher', 'Student']
+const validRoles = ['Administrator', 'Patron', 'Matron', 'Authorized Approver', 'Read-only Staff', 'Class Monitor', 'Teacher', 'Student']
 const classStructure = [
   ['Level 3', 'SOD', 'Class A'], ['Level 3', 'SOD', 'Class B'], ['Level 3', 'ELET', 'Class A'],
   ['Level 4', 'SOD', 'Class A'], ['Level 4', 'SOD', 'Class B'], ['Level 4', 'ELET', 'Class A'],
@@ -73,7 +79,7 @@ async function initializeDatabase() {
       username VARCHAR(80) NOT NULL UNIQUE,
       name VARCHAR(160) NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
-      role ENUM('Administrator','Patron','Authorized Approver','Read-only Staff','Class Monitor','Teacher','Student') NOT NULL DEFAULT 'Patron',
+      role ENUM('Administrator','Patron','Matron','Authorized Approver','Read-only Staff','Class Monitor','Teacher','Student') NOT NULL DEFAULT 'Patron',
       approval_status ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Approved',
       is_active BOOLEAN NOT NULL DEFAULT TRUE,
       class_id BIGINT UNSIGNED NULL,
@@ -108,6 +114,7 @@ async function initializeDatabase() {
       summary VARCHAR(500) NOT NULL,
       body TEXT NOT NULL,
       image_url VARCHAR(1000) NULL,
+      video_url VARCHAR(1000) NULL,
       author_id BIGINT UNSIGNED NOT NULL,
       published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_school_news_author FOREIGN KEY (author_id) REFERENCES users(id),
@@ -252,7 +259,11 @@ async function initializeDatabase() {
     ) ENGINE=InnoDB`,
   ]
   for (const statement of statements) await pool.query(statement)
-  await pool.query("ALTER TABLE users MODIFY role ENUM('Administrator','Patron','Authorized Approver','Read-only Staff','Class Monitor','Teacher','Student') NOT NULL DEFAULT 'Patron'")
+  await pool.query("ALTER TABLE users MODIFY role ENUM('Administrator','Patron','Matron','Authorized Approver','Read-only Staff','Class Monitor','Teacher','Student') NOT NULL DEFAULT 'Patron'")
+  const [newsColumns] = await pool.query('SHOW COLUMNS FROM school_news')
+  if (!newsColumns.some((column) => column.Field === 'video_url')) {
+    await pool.query('ALTER TABLE school_news ADD COLUMN video_url VARCHAR(1000) NULL AFTER image_url')
+  }
   const [userColumns] = await pool.query('SHOW COLUMNS FROM users')
   const existingUserColumns = new Set(userColumns.map((column) => column.Field))
   if (!existingUserColumns.has('approval_status')) {
@@ -303,6 +314,20 @@ async function initializeDatabase() {
   if (process.env.RESET_ADMIN_PASSWORD === 'true' && (!process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD)) {
     throw new Error('ADMIN_USERNAME and ADMIN_PASSWORD must be set to reset the administrator password.')
   }
+  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PREVIOUS_USERNAME && process.env.ADMIN_PREVIOUS_USERNAME !== process.env.ADMIN_USERNAME) {
+    const [previousAdmin] = await pool.execute(
+      "SELECT id FROM users WHERE username=? AND role='Administrator'",
+      [process.env.ADMIN_PREVIOUS_USERNAME],
+    )
+    if (previousAdmin.length) {
+      const [usernameCollision] = await pool.execute('SELECT id FROM users WHERE username=?', [process.env.ADMIN_USERNAME])
+      if (usernameCollision.some((user) => Number(user.id) !== Number(previousAdmin[0].id))) {
+        throw new Error('ADMIN_USERNAME is already assigned to another user; choose an unused administrator login.')
+      }
+      await pool.execute('UPDATE users SET username=? WHERE id=?', [process.env.ADMIN_USERNAME, previousAdmin[0].id])
+      console.info(`Updated the administrator login from "${process.env.ADMIN_PREVIOUS_USERNAME}" to "${process.env.ADMIN_USERNAME}".`)
+    }
+  }
   if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
     const [existing] = await pool.execute('SELECT id FROM users WHERE username = ?', [process.env.ADMIN_USERNAME])
     if (!existing.length && process.env.ADMIN_NAME) {
@@ -317,6 +342,23 @@ async function initializeDatabase() {
       const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
       await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, existing[0].id])
       console.info(`Reset the password for administrator account "${process.env.ADMIN_USERNAME}".`)
+    }
+  }
+  for (const account of [
+    { username: process.env.PATRON_USERNAME || 'estgpatron@gmail.com', password: process.env.PATRON_PASSWORD, name: process.env.PATRON_NAME, role: 'Patron' },
+    { username: process.env.MATRON_USERNAME || 'estgmatron@gmail.com', password: process.env.MATRON_PASSWORD, name: process.env.MATRON_NAME, role: 'Matron' },
+  ]) {
+    if (!account.password) continue
+    if (account.password.length < 12 || !account.name?.trim()) {
+      throw new Error(`${account.role} bootstrap requires a name and a password of at least 12 characters.`)
+    }
+    const [existing] = await pool.execute('SELECT id FROM users WHERE username=?', [account.username])
+    if (!existing.length) {
+      const passwordHash = await bcrypt.hash(account.password, 12)
+      await pool.execute('INSERT INTO users (username, name, password_hash, role) VALUES (?, ?, ?, ?)', [
+        account.username, account.name.trim(), passwordHash, account.role,
+      ])
+      console.info(`Created initial ${account.role.toLowerCase()} account "${account.username}".`)
     }
   }
 }
@@ -420,6 +462,90 @@ async function emailAdministratorOfSignup(account, classLabel) {
     return { sent: false, message: 'Your request was saved and is visible to the administrator in the app, but the email alert could not be delivered.' }
   }
 }
+
+async function emailAdministratorOfPermission(permission) {
+  const host = process.env.SMTP_HOST
+  const username = process.env.SMTP_USER
+  const password = process.env.SMTP_PASSWORD
+  const recipient = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_USERNAME
+  const port = Number(process.env.SMTP_PORT || 587)
+  if (!host || !username || !password || !recipient) {
+    return { sent: false, message: 'Permission approval is recorded in the administrator portal. Email alerts are not configured.' }
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { sent: false, message: 'Permission approval is recorded in the administrator portal, but the email alert port is invalid.' }
+  }
+  try {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: process.env.SMTP_SECURE === 'true' || port === 465,
+      auth: { user: username, pass: password },
+    })
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || username,
+      to: recipient,
+      subject: `Student permission approved: ${permission.full_name}`,
+      text: [
+        `A school permission was approved by ${permission.approvedBy}.`,
+        `Student: ${permission.full_name}`,
+        `Departure: ${permission.departure_at}`,
+        `Expected return: ${permission.expected_return_at}`,
+        `Reason: ${permission.reason}`,
+        'Sign in to the ESTG TSS administrator portal to review the permission record.',
+      ].join('\n'),
+    })
+    return { sent: true, message: 'Permission approved and the administrator was notified by email.' }
+  } catch (error) {
+    console.error('Permission approval email notification failed:', error.message)
+    return { sent: false, message: 'Permission approved and recorded in the administrator portal, but the email alert could not be delivered.' }
+  }
+}
+
+const allowedNewsMediaTypes = {
+  'image/jpeg': { extension: 'jpg', maxBytes: 8 * 1024 * 1024 },
+  'image/png': { extension: 'png', maxBytes: 8 * 1024 * 1024 },
+  'image/webp': { extension: 'webp', maxBytes: 8 * 1024 * 1024 },
+  'video/mp4': { extension: 'mp4', maxBytes: 25 * 1024 * 1024 },
+}
+
+function hasValidMediaSignature(contentType, data) {
+  if (contentType === 'image/jpeg') return data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
+  if (contentType === 'image/png') return data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  if (contentType === 'image/webp') return data.length >= 12 && data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP'
+  if (contentType === 'video/mp4') return data.length >= 12 && data.toString('ascii', 4, 8) === 'ftyp'
+  return false
+}
+
+app.get('/uploads/news/:filename', (req, res, next) => {
+  if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4)$/.test(req.params.filename)) {
+    return res.status(404).json({ error: 'Media file not found.' })
+  }
+  return res.sendFile(req.params.filename, { root: newsMediaDirectory, maxAge: '1y', immutable: true }, (error) => {
+    if (error) next(error)
+  })
+})
+
+app.post(
+  '/api/admin/school-media',
+  authenticate,
+  requireRole('Administrator'),
+  express.raw({ type: Object.keys(allowedNewsMediaTypes), limit: '25mb' }),
+  async (req, res, next) => {
+    try {
+      const contentType = req.get('Content-Type')?.split(';')[0].trim().toLowerCase()
+      const mediaType = allowedNewsMediaTypes[contentType]
+      if (!mediaType || !Buffer.isBuffer(req.body) || req.body.length === 0 || req.body.length > mediaType.maxBytes ||
+          !hasValidMediaSignature(contentType, req.body)) {
+        throw inputError('Upload a valid JPEG, PNG, or WebP image up to 8 MB, or an MP4 video up to 25 MB.')
+      }
+      await mkdir(newsMediaDirectory, { recursive: true })
+      const filename = `${randomUUID()}.${mediaType.extension}`
+      await writeFile(path.join(newsMediaDirectory, filename), req.body, { flag: 'wx' })
+      return res.status(201).json({ url: `/uploads/news/${filename}` })
+    } catch (error) { return next(error) }
+  },
+)
 
 app.post('/api/auth/login', async (req, res, next) => {
   try {
@@ -571,7 +697,7 @@ app.get('/api/public/classes', async (_req, res, next) => {
 app.get('/api/public/news', async (_req, res, next) => {
   try {
     const [news] = await pool.query(
-      `SELECT id, title, summary, body, image_url, published_at
+      `SELECT id, title, summary, body, image_url, video_url, published_at
        FROM school_news ORDER BY published_at DESC LIMIT 30`,
     )
     return res.json({ news })
@@ -625,16 +751,20 @@ app.delete('/api/admin/school-messages/:id', authenticate, requireRole('Administ
 
 app.post('/api/admin/school-news', authenticate, requireRole('Administrator'), async (req, res, next) => {
   try {
-    const { title, summary, body, imageUrl } = req.body || {}
+    const { title, summary, body, imageUrl, videoUrl } = req.body || {}
+    const validMediaUrl = (value) => value === undefined || value === '' ||
+      (typeof value === 'string' && value.length <= 1000 &&
+        (/^https:\/\/\S+$/i.test(value) || /^\/uploads\/news\/[0-9a-f-]{36}\.(jpg|png|webp|mp4)$/.test(value)))
     if (typeof title !== 'string' || !title.trim() || title.trim().length > 180 ||
         typeof summary !== 'string' || !summary.trim() || summary.trim().length > 500 ||
         typeof body !== 'string' || !body.trim() || body.trim().length > 10000 ||
-        (imageUrl !== undefined && imageUrl !== '' && (typeof imageUrl !== 'string' || imageUrl.length > 1000 || !/^https:\/\/\S+$/i.test(imageUrl)))) {
-      throw inputError('Enter a title (180 characters), summary (500 characters), story, and an optional HTTPS image URL.')
+        !validMediaUrl(imageUrl) || !validMediaUrl(videoUrl) ||
+        (imageUrl && /\.mp4(?:$|\?)/i.test(imageUrl)) || (videoUrl && !/\.mp4(?:$|\?)/i.test(videoUrl))) {
+      throw inputError('Enter a title, summary, story, and valid optional photo and MP4 video URLs.')
     }
     const [result] = await pool.execute(
-      'INSERT INTO school_news (title, summary, body, image_url, author_id) VALUES (?, ?, ?, ?, ?)',
-      [title.trim(), summary.trim(), body.trim(), imageUrl?.trim() || null, req.user.id],
+      'INSERT INTO school_news (title, summary, body, image_url, video_url, author_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [title.trim(), summary.trim(), body.trim(), imageUrl?.trim() || null, videoUrl?.trim() || null, req.user.id],
     )
     return res.status(201).json({ id: result.insertId })
   } catch (error) { return next(error) }
@@ -866,7 +996,7 @@ app.post('/api/attendance', authenticate, async (req, res, next) => {
   try {
     const { date, level, trade, className, records, reason, attendedBy = 'Staff', submitToAdmin = false } = req.body || {}
     if (!isValidDateOnly(date) || !level || !trade || !className || !Array.isArray(records) || !records.length) throw inputError('Select a valid date and class with students before saving attendance.')
-    if (!['Administrator', 'Patron', 'Authorized Approver', 'Class Monitor'].includes(req.user.role)) {
+    if (!['Administrator', 'Patron', 'Matron', 'Authorized Approver', 'Class Monitor'].includes(req.user.role)) {
       return res.status(403).json({ error: 'This account cannot record attendance.' })
     }
     if (!['Class Monitor', 'Class Mistress', 'Teacher', 'Staff'].includes(attendedBy)) throw inputError('Select who is taking attendance.')
@@ -1034,9 +1164,9 @@ app.post('/api/permissions/:id/:action', authenticate, requireWrite, async (req,
       const actionText = { approve: 'approved', reject: 'rejected', depart: 'marked departed', return: 'marked returned' }[action]
       throw inputError(`A ${permission.status.toLowerCase()} permission cannot be ${actionText}.`)
     }
-    if (['approve', 'reject'].includes(action) && !['Administrator', 'Authorized Approver'].includes(req.user.role)) {
+    if (['approve', 'reject'].includes(action) && !['Administrator', 'Patron', 'Matron', 'Authorized Approver'].includes(req.user.role)) {
       await connection.rollback()
-      return res.status(403).json({ error: 'Only an authorized approver or administrator can approve or reject permissions.' })
+      return res.status(403).json({ error: 'Only the administrator, patron, or matron can approve or reject permissions.' })
     }
     const nextStatus = transitions[action][1]
     if (action === 'approve') {
@@ -1056,7 +1186,10 @@ app.post('/api/permissions/:id/:action', authenticate, requireWrite, async (req,
     else await connection.execute('UPDATE permission_records SET status=? WHERE id=?', [nextStatus, req.params.id])
     await audit(connection, req.user.id, action, 'permission', req.params.id, `Permission ${action}`, { status: permission.status }, { status: nextStatus })
     await connection.commit()
-    return res.json({ success: true, status: nextStatus })
+    const notification = action === 'approve'
+      ? await emailAdministratorOfPermission({ ...permission, approvedBy: req.user.name })
+      : null
+    return res.json({ success: true, status: nextStatus, ...(notification || {}) })
   } catch (error) {
     await connection.rollback()
     return next(error)
@@ -1298,7 +1431,7 @@ app.delete('/api/reports/:id', authenticate, requireRole('Administrator'), async
   } catch (error) { return next(error) }
 })
 
-app.get('/api/dashboard', authenticate, requireRole('Administrator', 'Patron', 'Authorized Approver', 'Read-only Staff'), async (req, res, next) => {
+app.get('/api/dashboard', authenticate, requireRole('Administrator', 'Patron', 'Matron', 'Authorized Approver', 'Read-only Staff'), async (req, res, next) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0, 10)
     if (!isValidDateOnly(date)) throw inputError('Enter a valid dashboard date.')

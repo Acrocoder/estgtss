@@ -13,6 +13,9 @@ import {
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://estgtss-api.onrender.com/api'
+const mediaUrl = (url) => url?.startsWith('/uploads/')
+  ? `${API_URL.replace(/\/api\/?$/, '')}${url}`
+  : url
 const levels = ['Level 3', 'Level 4', 'Level 5']
 const trades = ['SOD', 'ELET']
 const navItems = [
@@ -100,6 +103,7 @@ function App() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [topUserOpen, setTopUserOpen] = useState(false)
 
   useEffect(() => { localStorage.removeItem('patron_token') }, [])
 
@@ -230,6 +234,7 @@ function App() {
     setToken('')
     setUser(null)
     setShowLogin(false)
+    setTopUserOpen(false)
   }
 
   if (!token && !showLogin) return <WelcomePage onSignIn={() => setShowLogin(true)} />
@@ -239,13 +244,13 @@ function App() {
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <a className="brand" href="#" onClick={(event) => event.preventDefault()}>
-          <span className="brand-mark"><GraduationCap size={23} /></span>
+          <span className="brand-mark"><img src="/images/estg-logo.svg" alt="" /></span>
           <span><strong>ESTG TSS</strong><small>Patron workspace</small></span>
         </a>
         <div className="nav-label">WORKSPACE</div>
         <nav>
           {visibleNavItems.map(({ label, icon: Icon }) => (
-            <button key={label} className={`nav-link ${activePage === label || (label === 'Account Requests' && activePage === 'Settings') ? 'active' : ''}`} onClick={() => { setPage(label === 'Account Requests' ? 'Account Requests' : label); setMenuOpen(false) }}>
+            <button key={label} className={`nav-link ${activePage === label || (label === 'Account Requests' && activePage === 'Settings') ? 'active' : ''}`} onClick={() => { setPage(label === 'Account Requests' ? 'Account Requests' : label); setMenuOpen(false); setTopUserOpen(false) }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
               {label === 'Account Requests' && pendingAccountRequests > 0 && <span className="nav-count">{pendingAccountRequests}</span>}
               {label === 'School News' && unreadSchoolMessages > 0 && <span className="nav-count">{unreadSchoolMessages}</span>}
@@ -271,7 +276,17 @@ function App() {
           <div className="top-actions">
             <div className="global-search-wrap"><label className="global-search"><Search size={17} /><input placeholder="Search students..." value={search} onChange={(event) => setSearch(event.target.value)} /></label>{search.trim() && <div className="global-results" role="listbox">{filteredStudents.slice(0, 6).map((student) => <button key={student.id} role="option" onClick={() => { setSelectedStudentId(student.id); setSearch('') }}><span className="avatar">{student.full_name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{student.full_name}</strong><small>{student.student_number} · {student.level} · {student.trade} {student.class_name}</small></span></button>)}{!filteredStudents.length && <p>No matching students.</p>}</div>}</div>
             <button className="icon-button notification-button" aria-label={pendingAccountRequests ? `${pendingAccountRequests} account requests need review` : 'Notifications'} onClick={() => { if (user?.role === 'Administrator') setPage('Account Requests') }}><Bell size={18} />{user?.role === 'Administrator' && pendingAccountRequests > 0 && <i />}</button>
-            <div className="top-user"><div className="avatar">{user?.name?.[0] || 'P'}</div><span>{user?.name || 'Patron'}<small>{user?.role || 'Staff'}</small></span><ChevronDown size={15} /></div>
+            <div className="top-user-wrap">
+              <button className="top-user" aria-haspopup="menu" aria-expanded={topUserOpen} onClick={() => setTopUserOpen((open) => !open)}>
+                <div className="avatar">{user?.name?.[0] || 'P'}</div><span>{user?.name || 'Patron'}<small>{user?.role || 'Staff'}</small></span><ChevronDown size={15} />
+              </button>
+              {topUserOpen && <div className="top-user-menu" role="menu">
+                <strong>{user?.role === 'Administrator' ? 'School Administrator' : user?.role === 'Matron' ? 'School Matron' : user?.role}</strong>
+                <small>{user?.username}</small>
+                <button role="menuitem" onClick={() => { setPage('Settings'); setTopUserOpen(false) }}><Settings size={15} />Settings</button>
+                <button role="menuitem" onClick={logout}><LogOut size={15} />Log out</button>
+              </div>}
+            </div>
           </div>
         </header>
         <div className="page-content">
@@ -335,12 +350,13 @@ function WelcomePage({ onSignIn }) {
     ['Gallery', 'gallery'], ['Student life', 'student-life'], ['Clubs', 'clubs'], ['Events', 'events'], ['Contact', 'contact'],
   ]
   const photos = [
-    { src: '/images/gallery-software.svg', label: 'Digital learning and collaboration', category: 'LEARNING' },
-    { src: '/images/gallery-electrical.svg', label: 'Technology in practice', category: 'PRACTICAL WORK' },
-    { src: '/images/gallery-team.svg', label: 'Teamwork and ideas', category: 'COMMUNITY' },
-    { src: '/images/gallery-electrical.svg', label: 'Exploring electrical systems', category: 'ELECTRICAL' },
-    { src: '/images/gallery-clubs.svg', label: 'A shared learning journey', category: 'SCHOOL LIFE' },
-    { src: '/images/gallery-events.svg', label: 'Students learning together', category: 'STUDENTS' },
+    { src: '/images/students-collaboration.jpg', label: 'Students learning together', category: 'STUDENT LIFE' },
+    { src: '/images/electrical-workshop.jpg', label: 'Students practicing electrical technology', category: 'ELECTRICAL' },
+    { src: '/images/school-gate.jpg', label: 'The ESTG TSS school entrance', category: 'OUR SCHOOL' },
+    { src: '/images/students-at-school.jpg', label: 'Students gathering at school', category: 'COMMUNITY' },
+    { src: '/images/school-office.jpg', label: 'The school administration office', category: 'OUR SCHOOL' },
+    { src: '/images/school-courtyard.jpg', label: 'The ESTG school courtyard', category: 'CAMPUS' },
+    { src: '/images/campus-buildings.jpg', label: 'Buildings on the ESTG campus', category: 'CAMPUS' },
   ]
   const pageDetails = {
     about: ['About our school', 'A technical education shaped by curiosity, responsibility, and practical learning.'],
@@ -353,9 +369,8 @@ function WelcomePage({ onSignIn }) {
     contact: ['Contact the school', 'Send a message to the school office or find another way to connect with us.'],
   }
   return <main className="public-site">
-    <div className="public-topline"><span>WELCOME TO ESTG TSS</span><span>Gisenyi, Rwanda · Technical learning for a changing world</span></div>
     <header className="public-header">
-      <a className="public-brand" href="#/home" aria-label="ESTG TSS home"><span><GraduationCap size={23} /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a>
+      <a className="public-brand" href="#/home" aria-label="ESTG TSS home"><span><img src="/images/estg-logo.svg" alt="" /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a>
       <button className="public-menu-toggle" aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}><Menu size={21} /></button>
       <nav className={mobileOpen ? 'public-nav open' : 'public-nav'} aria-label="School website navigation">
         {links.map(([label, id]) => <a key={id} className={page === id ? 'active' : ''} href={`#/${id}`}>{label}</a>)}
@@ -363,7 +378,7 @@ function WelcomePage({ onSignIn }) {
       </nav>
     </header>
     {page === 'home' ? <section className="public-hero">
-      <div className="public-hero-photo" role="img" aria-label="Students collaborating in a bright learning space" />
+      <div className="public-hero-photo" role="img" aria-label="ESTG TSS school campus" />
       <div className="public-hero-shade" />
       <div className="public-hero-content">
         <span className="public-eyebrow"><i /> WELCOME TO ESTG TSS</span>
@@ -387,18 +402,18 @@ function WelcomePage({ onSignIn }) {
     {page === 'home' || page === 'trades' ? <section className="public-section public-trades">
       <div className="public-section-heading"><span>LEARN BY DOING</span><h2>Technical pathways for a changing world.</h2><p>Build a strong foundation, develop practical skills, and keep asking what you can make better.</p></div>
       <div className="public-trade-grid">
-        <article className="public-trade-card trade-software"><div className="public-trade-icon"><Code2 size={24} /></div><span>SOD · LEVELS 3–5</span><h3>Software Development</h3><p>Explore programming, web design, databases, and the thinking behind useful, accessible digital experiences.</p><a href="#/trades">Explore software development <ArrowUpRight size={15} /></a></article>
-        <article className="public-trade-card trade-electrical"><div className="public-trade-icon"><Zap size={24} /></div><span>ELET · LEVELS 3–5</span><h3>Electrical Technology</h3><p>Learn about electrical systems, circuits, safe practice, and the technologies that keep people and places connected.</p><a href="#/trades">Explore electrical technology <ArrowUpRight size={15} /></a></article>
+        <article className="public-trade-card trade-software"><img className="public-trade-photo" src="/images/gallery-software.svg" alt="Illustration of software development" loading="lazy" /><div className="public-trade-icon"><Code2 size={24} /></div><span>SOD · LEVELS 3–5</span><h3>Software Development</h3><p>Explore programming, web design, databases, and the thinking behind useful, accessible digital experiences. Students learn to plan, build, test, and improve software that solves real problems.</p><a href="#/trades">Explore software development <ArrowUpRight size={15} /></a></article>
+        <article className="public-trade-card trade-electrical"><img className="public-trade-photo" src="/images/electrical-workshop.jpg" alt="ESTG students practicing electrical technology" loading="lazy" /><div className="public-trade-icon"><Zap size={24} /></div><span>ELET · LEVELS 3–5</span><h3>Electrical Technology</h3><p>Learn about electrical systems, circuits, safe practice, and the technologies that keep people and places connected. Practical workshops help learners build confidence with tools and electrical principles.</p><a href="#/trades">Explore electrical technology <ArrowUpRight size={15} /></a></article>
       </div>
     </section> : null}
     {page === 'home' || page === 'news' ? <section className="public-section public-news">
       <div className="public-section-title-row"><div className="public-section-heading"><span>FROM OUR COMMUNITY</span><h2>News & announcements</h2><p>Stories and updates shared by the school.</p></div>{page === 'home' && <a href="#/news">All school news <ArrowUpRight size={15} /></a>}</div>
-      {newsError ? <p className="public-inline-error" role="alert">{newsError}</p> : news.length ? <div className="public-news-grid">{(page === 'home' ? news.slice(0, 3) : news).map((item) => <article className="public-news-card" key={item.id}>{item.image_url && <img src={item.image_url} alt="" loading="lazy" />}<span>{new Date(item.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span><h3>{item.title}</h3><p>{item.summary}</p><details><summary>Read story</summary><p>{item.body}</p></details></article>)}</div> : <div className="public-empty-news"><BookOpen size={23} /><p>School news and announcements will appear here.</p></div>}
+      {newsError ? <p className="public-inline-error" role="alert">{newsError}</p> : news.length ? <div className="public-news-grid">{(page === 'home' ? news.slice(0, 3) : news).map((item) => <article className="public-news-card" key={item.id}>{item.image_url && <img src={mediaUrl(item.image_url)} alt="" loading="lazy" />}{item.video_url && <video src={mediaUrl(item.video_url)} controls preload="metadata" aria-label={`Video: ${item.title}`} />}<span>{new Date(item.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span><h3>{item.title}</h3><p>{item.summary}</p><details><summary>Read story</summary><p>{item.body}</p></details></article>)}</div> : <div className="public-empty-news"><BookOpen size={23} /><p>School news and announcements will appear here.</p></div>}
     </section> : null}
     {page === 'home' || page === 'gallery' ? <section className="public-section public-gallery">
       <div className="public-section-title-row"><div className="public-section-heading"><span>OUR MOMENTS</span><h2>Learning, making, belonging.</h2><p>A gallery celebrating the ideas and energy of school life.</p></div>{page === 'home' && <a href="#/gallery">Explore gallery <ArrowUpRight size={15} /></a>}</div>
       <div className="public-photo-grid">{(page === 'home' ? photos.slice(0, 4) : photos).map((photo, index) => <figure className={`public-photo photo-${index + 1}`} key={photo.src}><img src={photo.src} alt={photo.label} loading="lazy" /><figcaption><span>{photo.category}</span><strong>{photo.label}</strong></figcaption></figure>)}</div>
-      <p className="public-gallery-note">These original illustrations are temporary gallery artwork. School-owned photos can replace them when available.</p>
+      <p className="public-gallery-note">Photos shared by ESTG TSS. School staff can add new moments through the news publisher.</p>
     </section> : null}
     {page === 'home' || page === 'student-life' || page === 'clubs' || page === 'events' ? <section className="public-section public-life">
       <div className="public-section-heading"><span>BEYOND THE CLASSROOM</span><h2>Grow through every part of school life.</h2><p>Make friends, explore interests, and bring your ideas into the community.</p></div>
@@ -407,6 +422,12 @@ function WelcomePage({ onSignIn }) {
         <article><div className="life-icon"><Code2 size={21} /></div><span>INTERESTS & IDEAS</span><h3>Clubs</h3><p>Bring your interests together with others—share knowledge, make projects, and learn by doing.</p><a href="#/clubs">Explore clubs <ArrowUpRight size={14} /></a></article>
         <article><div className="life-icon"><CalendarDays size={21} /></div><span>TOGETHER AT SCHOOL</span><h3>Events</h3><p>School gatherings, showcases, and community activities create moments to learn and connect.</p><a href="#/events">School events <ArrowUpRight size={14} /></a></article>
       </div>
+      {page === 'clubs' && <div className="public-club-grid">
+        <article><img src="/images/gallery-software.svg" alt="Software development illustration" loading="lazy" /><span>CODE · CREATE · COLLABORATE</span><h3>Coding Club</h3><p>Students practice programming, experiment with web projects, and share the small steps that turn an idea into working software.</p><a href="#/trades">Explore Software Development <ArrowUpRight size={14} /></a></article>
+        <article><img src="/images/gallery-team.svg" alt="Students collaborating" loading="lazy" /><span>NETWORKS · INNOVATION · TECHNOLOGY</span><h3>NIT Club</h3><p>A space for curious learners to explore networks and information technology, exchange ideas, and build confidence with digital tools.</p><a href="#/trades">Explore technical trades <ArrowUpRight size={14} /></a></article>
+        <article><img src="/images/students-collaboration.jpg" alt="ESTG students working together" loading="lazy" /><span>STORIES · PHOTOGRAPHY · DESIGN</span><h3>Media Club</h3><p>Members develop communication and creative skills by documenting school activities and sharing positive stories from the ESTG community.</p><a href="#/gallery">View school gallery <ArrowUpRight size={14} /></a></article>
+        <article><img src="/images/students-at-school.jpg" alt="Students meeting together at school" loading="lazy" /><span>SERVICE · TEAMWORK · LEADERSHIP</span><h3>Scouts</h3><p>Scouts encourage service, responsibility, practical outdoor skills, and teamwork while helping students contribute to their community.</p><a href="#/student-life">Discover student life <ArrowUpRight size={14} /></a></article>
+      </div>}
     </section> : null}
     {page === 'contact' ? <section className="public-section public-contact-section">
       <div className="public-section-heading"><span>GET IN TOUCH</span><h2>We’d be glad to hear from you.</h2><p>Send a message to the school office. A school administrator can review it from the portal.</p>
@@ -427,7 +448,7 @@ function WelcomePage({ onSignIn }) {
     </section> : null}
     <section className="public-bottom-cta"><div><span>ESTG TSS · GISENYI</span><h2>Come curious. Leave capable.</h2><p>Explore our technical trades and take the next step in your learning journey.</p></div><a href="#/trades">Explore the trades <ArrowUpRight size={16} /></a></section>
     <footer className="public-footer">
-      <div className="public-footer-main"><a className="public-brand footer-brand" href="#/home"><span><GraduationCap size={22} /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a><p>Practical learning. Creative thinking.<br />A future built together.</p>      <div className="public-footer-social"><a href="https://www.instagram.com/" aria-label="Instagram" target="_blank" rel="noreferrer"><Camera size={17} /></a><a href="https://x.com/" aria-label="X" target="_blank" rel="noreferrer"><span className="social-x-mark">𝕏</span></a></div></div>
+      <div className="public-footer-main"><a className="public-brand footer-brand" href="#/home"><span><img src="/images/estg-logo.svg" alt="" /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a><p>Practical learning. Creative thinking.<br />A future built together.</p>      <div className="public-footer-social"><a href="https://www.instagram.com/" aria-label="Instagram" target="_blank" rel="noreferrer"><Camera size={17} /></a><a href="https://x.com/" aria-label="X" target="_blank" rel="noreferrer"><span className="social-x-mark">𝕏</span></a></div></div>
       <div className="public-footer-col"><strong>Discover</strong><a href="#/about">About us</a><a href="#/trades">Our trades</a><a href="#/news">School news</a><a href="#/gallery">Gallery</a></div>
       <div className="public-footer-col"><strong>School life</strong><a href="#/student-life">Student life</a><a href="#/clubs">Clubs</a><a href="#/events">Events</a><a href="#/contact">Contact us</a></div>
       <div className="public-footer-col"><strong>Connect</strong><span><MapPin size={14} />Gisenyi, Rwanda</span><button onClick={onSignIn}>Staff & student portal <ArrowUpRight size={14} /></button><a href="#/contact">Send the school a message</a></div>
@@ -498,7 +519,7 @@ function Login({ onLogin, onBack }) {
     <main className="login-page">
       <div className="login-card">
         <button className="text-button login-home-link" onClick={onBack}><ChevronLeft size={15} />Back to school home</button>
-        <div className="login-logo"><GraduationCap size={27} /></div>
+        <div className="login-logo"><img src="/images/estg-logo.svg" alt="ESTG TSS" /></div>
         <p className="eyebrow">ESTG TSS · SCHOOL PATRON</p>
         <h1>{!isSignup ? 'Welcome back' : `Request a ${mode === 'student' ? 'student' : mode === 'teacher' ? 'teacher' : 'class monitor'} account`}</h1>
         <p className="login-subtitle">{!isSignup ? 'Sign in to access your school account.' : 'The administrator must approve your request before you can sign in.'}</p>
@@ -522,7 +543,7 @@ function Login({ onLogin, onBack }) {
         {isSignup
           ? <button className="text-button" onClick={() => { setMode('login'); setError(''); setSuccess('') }}>Back to sign in</button>
           : <div className="signup-options"><p>Request a separate account as:</p><button className="text-button" onClick={() => { setMode('teacher'); setError(''); setSuccess('') }}>Teacher</button><button className="text-button" onClick={() => { setMode('monitor'); setError(''); setSuccess('') }}>Class monitor</button><button className="text-button" onClick={() => { setMode('student'); setError(''); setSuccess('') }}>Student</button></div>}
-        {!isSignup && <p className="login-footnote">Teacher, monitor, and student requests need administrator approval.</p>}
+        {!isSignup && <p className="login-footnote">Administrator: estgadministrator@gmail.com · Patron: estgpatron@gmail.com · Matron: estgmatron@gmail.com. Use the password provided privately by the school; change it in Settings after signing in. Teacher, monitor, and student requests need administrator approval.</p>}
       </div>
       <div className="login-decoration"><span>01 / SCHOOL LIFE</span><strong>Every student<br />seen. Every day.</strong><p>A calmer way to keep track of the moments that matter.</p><div className="decoration-line" /></div>
     </main>
@@ -809,7 +830,7 @@ function PermissionsPage({ token, students, classes, permissions, onRefresh, not
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState('')
   const [form, setForm] = useState({ level: '', trade: '', className: '', studentId: '', departureAt: '', expectedReturnAt: '', reason: '', destination: '', notes: '' })
-  const canApprove = ['Administrator', 'Authorized Approver'].includes(user?.role)
+  const canApprove = ['Administrator', 'Patron', 'Matron', 'Authorized Approver'].includes(user?.role)
   const canWrite = user?.role !== 'Read-only Staff'
   useEffect(() => {
     if (!selectedPermissionId) return undefined
@@ -822,9 +843,9 @@ function PermissionsPage({ token, students, classes, permissions, onRefresh, not
   }, [selectedPermissionId, token])
   async function updatePermission(id, action) {
     try {
-      await request(`/permissions/${id}/${action}`, { token, method: 'POST' })
+      const result = await request(`/permissions/${id}/${action}`, { token, method: 'POST' })
       await onRefresh()
-      notify(action === 'approve' ? 'Permission approved.' : action === 'reject' ? 'Permission rejected.' : 'Permission status updated.')
+      notify(action === 'approve' ? result.message : action === 'reject' ? 'Permission rejected.' : 'Permission status updated.')
     } catch (error) { reportError(error.message) }
   }
   async function submit(event) {
@@ -1090,9 +1111,10 @@ function ReportsInboxPage({ token, data, onRefresh, reportError, notify }) {
 function SchoolNewsAdminPage({ token, onUnreadCountChange, reportError, notify }) {
   const [news, setNews] = useState([])
   const [messages, setMessages] = useState([])
-  const [form, setForm] = useState({ title: '', summary: '', body: '', imageUrl: '' })
+  const [form, setForm] = useState({ title: '', summary: '', body: '', imageUrl: '', videoUrl: '' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [uploadingMedia, setUploadingMedia] = useState(false)
   useEffect(() => {
     let cancelled = false
     Promise.all([
@@ -1114,10 +1136,25 @@ function SchoolNewsAdminPage({ token, onUnreadCountChange, reportError, notify }
       await request('/admin/school-news', { token, method: 'POST', body: JSON.stringify(form) })
       const data = await request('/public/news')
       setNews(data.news)
-      setForm({ title: '', summary: '', body: '', imageUrl: '' })
+      setForm({ title: '', summary: '', body: '', imageUrl: '', videoUrl: '' })
       notify('News article published on the school website.')
     } catch (error) { reportError(error.message) }
     finally { setSaving(false) }
+  }
+  async function uploadMedia(file, field) {
+    if (!file) return
+    setUploadingMedia(true)
+    try {
+      const uploaded = await request('/admin/school-media', {
+        token,
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      })
+      setForm((current) => ({ ...current, [field]: mediaUrl(uploaded.url) }))
+      notify(field === 'imageUrl' ? 'News photo uploaded.' : 'News video uploaded.')
+    } catch (error) { reportError(error.message) }
+    finally { setUploadingMedia(false) }
   }
   async function removeNews(article) {
     if (!window.confirm(`Delete “${article.title}” from the public website?`)) return
@@ -1147,14 +1184,19 @@ function SchoolNewsAdminPage({ token, onUnreadCountChange, reportError, notify }
     } catch (error) { reportError(error.message) }
   }
   return <>
-    <PageHeading eyebrow="PUBLIC WEBSITE" title="News & contact messages" description="Publish school updates for the public website and manage messages sent through Contact us." />
+    <PageHeading eyebrow="SCHOOL ADMINISTRATOR" title="News & contact messages" description="Publish school updates for the public website and manage messages sent through Contact us." />
     <section className="panel settings-card public-news-admin-form"><h2>Publish a school news article</h2><p>Published articles appear in the public News section.</p>
       <form className="modal-form" onSubmit={publishNews}>
         <label>Headline<input required maxLength="180" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
         <label>Short summary<input required maxLength="500" value={form.summary} onChange={(event) => setForm({ ...form, summary: event.target.value })} /></label>
         <label>Full article<textarea required maxLength="10000" rows="6" value={form.body} onChange={(event) => setForm({ ...form, body: event.target.value })} /></label>
-        <label>Photo URL <span className="field-hint">(optional; use an HTTPS image URL)</span><input type="url" value={form.imageUrl} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://…" /></label>
-        <div className="modal-actions"><button className="primary-button" disabled={saving}>{saving ? 'Publishing…' : 'Publish news article'} <ArrowUpRight size={15} /></button></div>
+        <label>Photo URL <span className="field-hint">(optional; upload a photo or use an HTTPS image URL)</span><input type="url" value={form.imageUrl} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://…" /></label>
+        <label className="media-upload-field">Upload photo <span className="field-hint">JPEG, PNG, or WebP · max 8 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingMedia} onChange={(event) => void uploadMedia(event.target.files?.[0], 'imageUrl')} /></label>
+        <label>Short video URL <span className="field-hint">(optional; upload an MP4 or use an HTTPS MP4 URL)</span><input type="url" value={form.videoUrl} onChange={(event) => setForm({ ...form, videoUrl: event.target.value })} placeholder="https://…" /></label>
+        <label className="media-upload-field">Upload short video <span className="field-hint">MP4 · max 25 MB</span><input type="file" accept="video/mp4,.mp4" disabled={uploadingMedia} onChange={(event) => void uploadMedia(event.target.files?.[0], 'videoUrl')} /></label>
+        {uploadingMedia && <p className="field-hint" role="status">Uploading media…</p>}
+        {(form.imageUrl || form.videoUrl) && <div className="news-media-preview">{form.imageUrl && <img src={mediaUrl(form.imageUrl)} alt="News photo preview" />}{form.videoUrl && <video src={mediaUrl(form.videoUrl)} controls preload="metadata" aria-label="News video preview" />}</div>}
+        <div className="modal-actions"><button className="primary-button" disabled={saving || uploadingMedia}>{saving ? 'Publishing…' : 'Publish news article'} <ArrowUpRight size={15} /></button></div>
       </form>
     </section>
     <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>Published news</h2><p>{news.length} articles on the public website.</p></div></div>
@@ -1273,7 +1315,7 @@ function SettingsPage({ token, user, classes, onCreateClass, onPendingAccountReq
     <div className="settings-grid"><section className="panel settings-card"><div className="settings-card-heading"><div className="settings-icon"><GraduationCap size={20} /></div>{user?.role === 'Administrator' && <button className="secondary-button" onClick={() => setShowClassForm(true)}><Plus size={14} />Add class</button>}</div><h2>School structure</h2><p>Student classes are filtered by level and trade throughout the system.</p><div className="structure-list">{levels.map((level) => <div key={level}><strong>{level}</strong><span>{trades.map((trade) => `${trade} · ${classes.filter((item) => item.level === level && item.trade === trade).map((item) => item.class_name).join(', ') || 'No classes'}`).join('  |  ')}</span></div>)}</div><small className="settings-note">{user?.role === 'Administrator' ? 'Add a class to update student registration and attendance options.' : 'School structure changes are managed by your system administrator.'}</small></section><section className="panel settings-card"><div className="settings-icon green"><UserRound size={20} /></div><h2>Your account</h2><p>Signed in identity and permissions for this session.</p><div className="account-detail"><span>Name</span><strong>{user?.name}</strong></div><div className="account-detail"><span>Username</span><strong>{user?.username}</strong></div><div className="account-detail"><span>Role</span><strong><StatusBadge status={user?.role} /></strong></div><div className="access-note"><ShieldCheck size={16} />Permission approval is restricted to authorized approvers and administrators.</div></section><section className="panel settings-card"><div className="settings-icon green"><LockKeyhole size={20} /></div><h2>Change password</h2><p>Choose a new password with at least 12 characters. Your current password is required to confirm this change.</p>{passwordError && <div className="form-error" role="alert">{passwordError}</div>}<form className="settings-password-form" onSubmit={changePassword}><label>Current password<input required type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label><label>New password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label><label>Confirm new password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label><button className="primary-button"><LockKeyhole size={15} />Update password</button></form></section></div>
     {user?.role === 'Administrator' && <section className="panel table-panel user-management" id="account-requests"><div className="table-toolbar"><div><h2>Account requests {users.filter((account) => account.approval_status === 'Pending').length > 0 && <span className="request-count">{users.filter((account) => account.approval_status === 'Pending').length} pending</span>}</h2><p>Review new requests, approve access, and remove teachers who have left the school.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add staff user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME / STUDENT ID</th><th>ACCOUNT TYPE</th><th>CLASS / TEACHING ASSIGNMENTS</th><th>ACCOUNT STATUS</th><th>ADDED</th><th>ACTION</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.linked_student_number || account.username}</td><td><StatusBadge status={account.role} /></td><td>{account.role === 'Teacher' ? (account.teaching_assignments || 'No teaching assignments') : account.linked_student_number ? 'Student ID matched to school register' : account.level ? `${account.level} · ${account.trade} · ${account.class_name}` : '—'}{account.role !== 'Teacher' && account.subject ? ` · ${account.subject}` : ''}{account.class_mistress_name ? ` · Mistress: ${account.class_mistress_name}` : ''}</td><td>{account.approval_status === 'Pending' ? <StatusBadge status="Pending" /> : <StatusBadge status={account.is_active ? 'Active' : 'Removed'} />}</td><td>{new Date(account.created_at).toLocaleDateString()}</td><td>{account.approval_status === 'Pending' ? <div className="approval-actions"><button className="primary-button" onClick={() => reviewAccount(account.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewAccount(account.id, 'Rejected')}>Reject</button></div> : account.role === 'Teacher' && account.approval_status === 'Approved' && <button className={account.is_active ? 'secondary-button' : 'primary-button'} onClick={() => void setTeacherStatus(account, !account.is_active)}>{account.is_active ? 'Remove teacher' : 'Restore access'}</button>}</td></tr>)}</tbody></table></div>{!users.length && <EmptyState message="No account requests or staff accounts yet." />}</section>}
     {user?.role === 'Administrator' && <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>Teacher subject and class approvals {teacherAssignments.filter((assignment) => assignment.approval_status === 'Pending').length > 0 && <span className="request-count">{teacherAssignments.filter((assignment) => assignment.approval_status === 'Pending').length} pending</span>}</h2><p>Teachers can request each subject they teach in each class. Approve assignments before they can report or access those students.</p></div></div><div className="table-scroll"><table><thead><tr><th>TEACHER</th><th>LEVEL</th><th>TRADE</th><th>CLASS</th><th>SUBJECT</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>{teacherAssignments.map((assignment) => <tr key={assignment.id}><td><strong>{assignment.teacher_name}</strong><small className="sub-cell">{assignment.username}</small></td><td>{assignment.level}</td><td>{assignment.trade}</td><td>{assignment.class_name}</td><td>{assignment.subject}</td><td><StatusBadge status={assignment.approval_status} /></td><td>{assignment.approval_status === 'Pending' && <div className="approval-actions"><button className="primary-button" onClick={() => reviewTeachingAssignment(assignment.id, 'Approved')}>Approve</button><button className="secondary-button" onClick={() => reviewTeachingAssignment(assignment.id, 'Rejected')}>Reject</button></div>}</td></tr>)}</tbody></table></div>{!teacherAssignments.length && <EmptyState message="No teaching assignments have been submitted." />}</section>}
-    {showForm && <Modal title="Create user account" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={createUser}><label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Username<input required autoComplete="off" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><div className="field-grid two"><label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option>Patron</option><option>Authorized Approver</option><option>Read-only Staff</option><option>Administrator</option></select></label><label>Password (12+ characters)<input required minLength="12" type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Create account</button></div></form></Modal>}
+    {showForm && <Modal title="Create user account" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={createUser}><label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Username<input required autoComplete="off" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><div className="field-grid two"><label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option>Patron</option><option>Matron</option><option>Authorized Approver</option><option>Read-only Staff</option><option>Administrator</option></select></label><label>Password (12+ characters)<input required minLength="12" type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Create account</button></div></form></Modal>}
     {showClassForm && <Modal title="Add a school class" onClose={() => setShowClassForm(false)}><form className="modal-form" onSubmit={createClass}><div className="field-grid two"><label>Level<select value={classForm.level} onChange={(event) => setClassForm({ ...classForm, level: event.target.value })}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label><label>Trade<select value={classForm.trade} onChange={(event) => setClassForm({ ...classForm, trade: event.target.value })}>{trades.map((trade) => <option key={trade}>{trade}</option>)}</select></label></div><label>Class name<input required pattern="Class [A-Z]" title="Use a name such as Class C" value={classForm.className} onChange={(event) => setClassForm({ ...classForm, className: event.target.value })} placeholder="Class C" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowClassForm(false)}>Cancel</button><button className="primary-button">Add class</button></div></form></Modal>}
   </>
 }

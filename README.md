@@ -10,7 +10,7 @@ A React and Express application for student registration, daily attendance, stud
 ## Run locally
 
 1. Create a MySQL database and a database user with permission to create and update tables in that database.
-2. Copy `.env.example` to `.env` and set the database credentials, a unique JWT secret, and a one-time administrator account. Use a secret password and do not commit `.env`.
+2. Copy `.env.example` to `.env` and set the database credentials, a unique JWT secret, and a one-time administrator account. Set the administrator username to `estgadministrator@gmail.com`; use a private, unique password of at least 12 characters and do not commit `.env`.
 3. Install packages with `npm install`.
 4. Start the API in one terminal with `npm run server`.
 5. Start the React app in a second terminal with `npm run dev`.
@@ -24,14 +24,15 @@ In-app notifications are available to administrators. To also email the administ
 
 The Vite build produces an installable PWA named **ETG TSS**. The install banner appears only when the browser offers installation; on iPhone and iPad it provides Safari **Share → Add to Home Screen** steps. The app shell and static assets are precached. Authenticated API calls, records, and credentials are not cached, so attendance and other live data require the API, MySQL, and a network connection.
 
-The home-screen icons are generated from the graduation-cap mark already used in the app interface. No official school logo asset was present in the project. Replace the two PNGs under `public/icons/` with approved school artwork if provided, keeping both required dimensions and filenames.
+The workspace and public site use an ESTG TSS mark. The home-screen icons under `public/icons/` remain separate PWA assets; replace them with approved school artwork if available, keeping both required dimensions and filenames.
 
 ## Production build and deployment
 
 1. Deploy the frontend build output from `dist/` to a static web host with HTTPS enabled. The PWA requires HTTPS in public deployments; `localhost` is suitable only for local testing.
 2. Deploy the Express API and MySQL database separately to reachable hosting. Do not point the public app at `localhost`; configure `VITE_API_URL` to the public HTTPS API URL ending in `/api` before building.
 3. Configure the API's `CLIENT_ORIGIN` with the exact HTTPS frontend origin and set production MySQL credentials and a unique `JWT_SECRET` on the API host. Do not place database secrets in frontend variables.
-4. Rebuild and publish the generated assets whenever the frontend changes:
+4. For news image/video uploads, mount persistent storage for the API and set `NEWS_MEDIA_DIR` to that mounted directory. Without persistent storage, the host may remove uploaded media during restarts or redeploys.
+5. Rebuild and publish the generated assets whenever the frontend changes:
 
 ```sh
 npm install
@@ -45,7 +46,7 @@ If the host requires SPA rewrites, send frontend navigation requests to `index.h
 
 On Android, visit the HTTPS site in Chrome and choose **Install ETG TSS App** when offered. On iPhone/iPad, open the HTTPS site in Safari, tap **Share**, then **Add to Home Screen**. Launch the new icon; the browser address bar is hidden when `display-mode: standalone` is active.
 
-The first server start creates the schema, seeds the currently configured level/trade/class combinations, and creates the initial administrator if that username does not already exist. The initial administrator password is hashed with bcrypt. The bootstrap account uses the configured `ADMIN_USERNAME` and `ADMIN_PASSWORD`; the bootstrap password must be at least 8 characters. This bootstrap-only minimum is weaker than the 12-character requirement for subsequently created accounts, so use a strong password before production. If you need to reset an existing bootstrap administrator's password, set `RESET_ADMIN_PASSWORD=true` alongside `ADMIN_USERNAME` and the new `ADMIN_PASSWORD`, deploy/restart the API once, then remove `RESET_ADMIN_PASSWORD` from the environment. After first startup, remove the bootstrap `ADMIN_PASSWORD` and `ADMIN_NAME` values from the environment; create further accounts through the authenticated admin user API.
+The first server start creates the schema, seeds the configured level/trade/class combinations, and creates the administrator when `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_NAME` are set and that username does not yet exist. The recommended administrator login is `estgadministrator@gmail.com`. Optional Patron and Matron bootstrap accounts use `estgpatron@gmail.com` and `estgmatron@gmail.com`; configure their names and private passwords with `PATRON_*` and `MATRON_*` before first startup. Bootstrap passwords are hashed with bcrypt. Never use a shared public password such as `ESTG@123`; choose unique passwords with at least 12 characters, then remove bootstrap password values from the host environment after setup. Account holders can change their password from Settings. If you need to reset an existing bootstrap administrator's password, set `RESET_ADMIN_PASSWORD=true` alongside `ADMIN_USERNAME` and the new private `ADMIN_PASSWORD`, deploy/restart the API once, then remove `RESET_ADMIN_PASSWORD` from the environment. To rename an existing administrator login, set `ADMIN_PREVIOUS_USERNAME` to its exact current username for one startup while setting the new `ADMIN_USERNAME`; remove the previous-username variable afterward.
 
 ## Configuration
 
@@ -57,11 +58,15 @@ The first server start creates the schema, seeds the currently configured level/
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Existing database and application credentials |
 | `JWT_SECRET` | Random secret of at least 32 characters used to sign 12-hour access tokens |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Optional first-run bootstrap administrator |
+| `ADMIN_PREVIOUS_USERNAME` | Optional one-time rename of an existing administrator username to `ADMIN_USERNAME` |
 | `RESET_ADMIN_PASSWORD` | Set to `true` temporarily to reset the configured bootstrap administrator's password at startup |
+| `PATRON_USERNAME`, `PATRON_PASSWORD`, `PATRON_NAME` | Optional first-run Patron account; defaults to `estgpatron@gmail.com` |
+| `MATRON_USERNAME`, `MATRON_PASSWORD`, `MATRON_NAME` | Optional first-run Matron account; defaults to `estgmatron@gmail.com` |
 | `VITE_API_URL` | API base URL for the frontend (default `https://estgtss-api.onrender.com/api`) |
-| `ADMIN_NOTIFICATION_EMAIL` | Administrator email for new account-request alerts (defaults to `ADMIN_USERNAME`) |
+| `ADMIN_NOTIFICATION_EMAIL` | Administrator/director email for account-request and permission-approval alerts (defaults to `ADMIN_USERNAME`) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | SMTP server host, port (default `587`), and TLS mode (`true` to force TLS; port `465` uses TLS automatically) |
 | `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | SMTP authentication and optional sender address; keep credentials private on the API host |
+| `NEWS_MEDIA_DIR` | Optional directory for uploaded news media; mount persistent storage here on the API host |
 
 `server/server.js` contains the idempotent schema bootstrap. Back up the MySQL database regularly and use TLS and restricted database/network access for deployment. This local starter does not configure automated backups or production hosting.
 
@@ -75,13 +80,13 @@ The first server start creates the schema, seeds the currently configured level/
 - Permission requests with role-restricted approval/rejection and recorded departure/return actions. Permission rows open the full request details and audit history, including actual return time.
 - Behaviour awards and incident deductions with reasons and staff attribution.
 - Attendance date-range reports, permission and behaviour views with CSV export and print support.
-- Administrator, Patron, Authorized Approver, Read-only Staff, Teacher, Class Monitor, and Student roles. Student/attendance/permission/behaviour write endpoints reject read-only accounts.
+- Administrator, Patron, Matron, Authorized Approver, Read-only Staff, Teacher, Class Monitor, and Student roles. The Patron and Matron can record attendance, manage student behaviour marks, and approve or reject permissions. Permission approvals appear in the administrator portal and send an email to the director when SMTP is configured.
 - Separate teacher, class monitor, and student account requests; student accounts must match an active registered student ID and name. Administrator notifications, email alerts (when SMTP is configured), and Approve/Reject actions manage pending requests.
 - Teachers can submit a subject assignment for each class they teach across Levels 3–5 and the SOD/ELET trades. Administrators approve assignments before teachers can submit class reports or access student records in that class. The administrator can suspend and restore a teacher account without deleting their audit history or submitted reports.
 - Teachers and class monitors request accounts with their assigned class; monitor requests include the class mistress's name. Student accounts are limited to their own linked attendance, permission, behaviour, and report records.
 - The public welcome page introduces Ecole secondaire Technique de Gisenyi, its technical trades, and the school portal. Authenticated sessions are kept in per-tab session storage; the API reloads the current active account and role from the database on each request.
-- The public school website has linked Home, About, Trades, News, Gallery, Student Life, Clubs, Events, and Contact pages. The contact form delivers messages to the administrator's portal inbox; administrators can publish and remove school news under **School News**. News is stored in MySQL and shown on the public News page.
-- The hero and gallery use original local SVG illustrations, so they do not depend on remote image hosts. Replace these illustrations with approved school photographs when available. The Instagram and X links currently lead to the platforms, not verified ESTG accounts.
+- The public school website has linked Home, About, Trades, News, Gallery, Student Life, Clubs, Events, and Contact pages. The contact form delivers messages to the administrator's portal inbox; administrators can publish and remove news under **School News**, including uploaded JPEG/PNG/WebP photos (up to 8 MB) and MP4 videos (up to 25 MB).
+- The site gallery uses the school photos supplied for this project. The Software Development and Electrical Technology trades include related illustrations and workshop photos; the Clubs page describes Coding Club, NIT Club, Media Club, and Scouts. The Instagram and X links currently lead to the platforms, not verified ESTG accounts.
 - Class monitors record attendance as themselves or the class mistress and can explicitly submit the register to the administrator. Teachers and monitors submit daily subject/lesson reports; teachers can refer student behaviour concerns to the administrator.
 - Permission approval creates a Kinyarwanda guardian message in the administrator's outbox when a guardian phone number is registered. The message is queued for review only; sending SMS requires a configured SMS gateway and credentials.
 - Administrators can review or reject staff account requests and delete unnecessary daily reports. Account approvals, attendance, and report removals are auditable.
@@ -101,8 +106,8 @@ All routes except `POST /api/auth/login` require a bearer token.
 - `GET/POST /api/behaviour`
 - `GET /api/dashboard?date=YYYY-MM-DD`
 - `GET /api/public/classes`; `POST /api/auth/register` (teacher and class monitor account requests); `POST /api/auth/register/student` (student account request matched to an active student record)
-- Public website: `GET /api/public/news`; `POST /api/public/contact`
-- Administrator only: `POST/DELETE /api/admin/school-news`; `GET/PATCH/DELETE /api/admin/school-messages`
+- Public website: `GET /api/public/news`; `POST /api/public/contact`; uploaded media is served at `/uploads/news/:filename`
+- Administrator only: `POST/DELETE /api/admin/school-news`; `POST /api/admin/school-media` (images/MP4); `GET/PATCH/DELETE /api/admin/school-messages`
 - Teacher only: `GET/POST /api/teacher/assignments`; `DELETE /api/teacher/assignments/:id`
 - Administrator only: `GET /api/admin/teacher-assignments`; `PATCH /api/admin/teacher-assignments/:id/approval`; `PATCH /api/users/:id/status` (suspend/restore approved teacher accounts)
 - `GET/POST /api/reports`; Administrator only: `DELETE /api/reports/:id`
