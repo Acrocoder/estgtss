@@ -69,6 +69,10 @@ The first server start creates the schema, seeds the currently configured level/
 - Behaviour awards and incident deductions with reasons and staff attribution.
 - Attendance date-range reports, permission and behaviour views with CSV export and print support.
 - Administrator, Patron, Authorized Approver, and Read-only Staff roles. Student/attendance/permission/behaviour write endpoints reject read-only accounts.
+- Teachers and class monitors can request accounts with their assigned class; an administrator must approve each request before sign-in is enabled. Monitor requests include the class mistress's name.
+- Class monitors record attendance as themselves or the class mistress and can explicitly submit the register to the administrator. Teachers and monitors submit daily subject/lesson reports; teachers can refer student behaviour concerns to the administrator.
+- Permission approval creates a Kinyarwanda guardian message in the administrator's outbox when a guardian phone number is registered. The message is queued for review only; sending SMS requires a configured SMS gateway and credentials.
+- Administrators can review or reject staff account requests and delete unnecessary daily reports. Account approvals, attendance, and report removals are auditable.
 - Account holders can change their own password from Settings after confirming their current password; new passwords must be at least 12 characters.
 - Audit entries for student changes, attendance changes, permission decisions, and behaviour transactions.
 
@@ -84,7 +88,9 @@ All routes except `POST /api/auth/login` require a bearer token.
 - `GET/POST /api/permissions`; `POST /api/permissions/:id/{approve,reject,depart,return}`
 - `GET/POST /api/behaviour`
 - `GET /api/dashboard?date=YYYY-MM-DD`
-- Administrator only: `GET/POST /api/users`
+- `GET /api/public/classes`; `POST /api/auth/register` (teacher and class monitor account requests)
+- `GET/POST /api/reports`; Administrator only: `DELETE /api/reports/:id`
+- Administrator only: `GET/POST /api/users`; `PATCH /api/users/:id/approval`
 
 ## Validation
 
