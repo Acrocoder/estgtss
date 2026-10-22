@@ -62,10 +62,10 @@ export default function PwaInstallExperience() {
   const canInstall = !installed && (Boolean(deferredPrompt) || (isIosDevice() && !isStandalone()))
   return <>
     {offline && <div className="pwa-status-banner pwa-offline" role="status"><strong>You’re offline.</strong><span>The app shell may open, but student records and other live data need the school server and an internet connection.</span></div>}
-    {needRefresh && <div className="pwa-status-banner pwa-update" role="status"><span>A new version of ETG TSS is ready.</span><button className="pwa-action" onClick={() => updateServiceWorker(true)}><RefreshCw size={15} />Update</button></div>}
-    {canInstall && !dismissed && <aside className="pwa-install-banner" aria-label="Install ETG TSS">
+    {needRefresh && <div className="pwa-status-banner pwa-update" role="status"><span>A new version of ESTG TSS is ready.</span><button className="pwa-action" onClick={() => updateServiceWorker(true)}><RefreshCw size={15} />Update</button></div>}
+    {canInstall && !dismissed && <aside className="pwa-install-banner" aria-label="Install ESTG TSS">
       <img src="/icons/etg-tss-192.png" alt="" width="40" height="40" />
-      <div className="pwa-install-copy"><strong>Install ETG TSS App</strong><span>Keep the school workspace one tap away.</span></div>
+      <div className="pwa-install-copy"><strong>Install ESTG TSS App</strong><span>Keep the school workspace one tap away.</span></div>
       {deferredPrompt
         ? <button className="pwa-action" onClick={installApp}><Download size={16} />Install</button>
         : <button className="pwa-action" onClick={() => setIosInstructionsOpen(true)}><Share size={16} />How to install</button>}
@@ -73,12 +73,12 @@ export default function PwaInstallExperience() {
     </aside>}
     {iosInstructionsOpen && <div className="pwa-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIosInstructionsOpen(false) }}>
       <section className="pwa-modal" role="dialog" aria-modal="true" aria-labelledby="pwa-ios-title">
-        <header><h2 id="pwa-ios-title">Add ETG TSS to your Home Screen</h2><button className="pwa-dismiss" aria-label="Close instructions" onClick={() => setIosInstructionsOpen(false)}><X size={18} /></button></header>
+        <header><h2 id="pwa-ios-title">Add ESTG TSS to your Home Screen</h2><button className="pwa-dismiss" aria-label="Close instructions" onClick={() => setIosInstructionsOpen(false)}><X size={18} /></button></header>
         <ol>
-          <li>Open the ETG TSS website in <strong>Safari</strong>. Home Screen installation is not available from every iPhone browser.</li>
+          <li>Open the ESTG TSS website in <strong>Safari</strong>. Home Screen installation is not available from every iPhone browser.</li>
           <li>Tap Safari’s <strong>Share</strong> button (the square with an arrow pointing up).</li>
           <li>Scroll down and tap <strong>Add to Home Screen</strong>. On some iOS versions, tap <strong>Edit Actions</strong> if the option is not shown.</li>
-          <li>Keep the name <strong>ETG TSS</strong>, then tap <strong>Add</strong>.</li>
+          <li>Keep the name <strong>ESTG TSS</strong>, then tap <strong>Add</strong>.</li>
         </ol>
         <p>Open the new Home Screen icon to launch ESTG TSS in its app window. A secure HTTPS website is required.</p>
         <button className="pwa-action" onClick={() => setIosInstructionsOpen(false)}>Got it</button>

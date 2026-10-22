@@ -3,8 +3,8 @@ import {
   Activity, ArrowDownToLine, ArrowUpRight, Bell, BookOpen, CalendarDays,
   Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, ClipboardCheck,
   Clock3, Download, FileBarChart2, GraduationCap, LayoutDashboard, LockKeyhole, LogOut,
-  Menu, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, UserRound,
-  Users, X, XCircle,
+  Languages, Menu, Moon, Plus, Search, Settings, ShieldCheck, SlidersHorizontal, Sun,
+  UserRound, Users, X, XCircle,
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -21,7 +21,14 @@ const navItems = [
   { label: 'Permissions', icon: ShieldCheck },
   { label: 'Behaviour', icon: Activity },
   { label: 'Reports', icon: FileBarChart2 },
+  { label: 'Student Life', icon: GraduationCap },
 ]
+const translations = {
+  en: { Overview: 'Overview', Students: 'Students', Attendance: 'Attendance', Permissions: 'Permissions', Behaviour: 'Behaviour', Reports: 'Reports', 'Student Life': 'Student Life', Settings: 'Settings', 'Welcome back': 'Welcome back', 'Sign in': 'Sign in', 'School life': 'School life' },
+  rw: { Overview: 'Incamake', Students: 'Abanyeshuri', Attendance: 'Abitabiriye', Permissions: 'Impushya', Behaviour: 'Imyitwarire', Reports: 'Raporo', 'Student Life': 'Ubuzima bw’abanyeshuri', Settings: 'Igenamiterere', 'Welcome back': 'Murakaza neza', 'Sign in': 'Injira', 'School life': 'Ubuzima bw’ishuri' },
+  fr: { Overview: 'Aperçu', Students: 'Étudiants', Attendance: 'Présence', Permissions: 'Autorisations', Behaviour: 'Comportement', Reports: 'Rapports', 'Student Life': 'Vie étudiante', Settings: 'Paramètres', 'Welcome back': 'Bon retour', 'Sign in': 'Se connecter', 'School life': 'Vie scolaire' },
+}
+const translate = (language, text) => translations[language]?.[text] || text
 const todayDate = new Date()
 const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`
 const todayLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()
@@ -75,6 +82,8 @@ function ClassFields({ values, onChange, classes }) {
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('patron_token') || '')
+  const [language, setLanguage] = useState(() => localStorage.getItem('estg_language') || 'en')
+  const [theme, setTheme] = useState(() => localStorage.getItem('estg_theme') || 'day')
   const [user, setUser] = useState(null)
   const [page, setPage] = useState('Overview')
   const [students, setStudents] = useState([])
@@ -159,27 +168,38 @@ function App() {
     setUser(null)
   }
 
-  if (!token) return <Login onLogin={(newToken) => { localStorage.setItem('patron_token', newToken); setToken(newToken) }} />
+  function updateLanguage(value) {
+    localStorage.setItem('estg_language', value)
+    setLanguage(value)
+  }
+
+  function toggleTheme() {
+    const nextTheme = theme === 'day' ? 'night' : 'day'
+    localStorage.setItem('estg_theme', nextTheme)
+    setTheme(nextTheme)
+  }
+
+  if (!token) return <Login language={language} onLanguageChange={updateLanguage} onLogin={(newToken) => { localStorage.setItem('patron_token', newToken); setToken(newToken) }} />
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <a className="brand" href="#" onClick={(event) => event.preventDefault()}>
           <span className="brand-mark"><GraduationCap size={23} /></span>
           <span><strong>ESTG TSS</strong><small>Patron workspace</small></span>
         </a>
-        <div className="nav-label">WORKSPACE</div>
+        <div className="nav-label">{translate(language, 'School life').toUpperCase()}</div>
         <nav>
           {navItems.map(({ label, icon: Icon }) => (
             <button key={label} className={`nav-link ${page === label ? 'active' : ''}`} onClick={() => { setPage(label); setMenuOpen(false) }}>
-              <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
+              <Icon size={18} strokeWidth={1.8} /><span>{translate(language, label)}</span>
               {label === 'Permissions' && permissions.filter((item) => item.status === 'Pending').length > 0 &&
                 <span className="nav-count">{permissions.filter((item) => item.status === 'Pending').length}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`nav-link ${page === 'Settings' ? 'active' : ''}`} onClick={() => { setPage('Settings'); setMenuOpen(false) }}><Settings size={18} /><span>Settings</span></button>
+          <button className={`nav-link ${page === 'Settings' ? 'active' : ''}`} onClick={() => { setPage('Settings'); setMenuOpen(false) }}><Settings size={18} /><span>{translate(language, 'Settings')}</span></button>
           <div className="sidebar-profile">
             <div className="avatar">{user?.name?.[0] || 'P'}</div>
             <div className="profile-copy"><strong>{user?.name || 'Patron'}</strong><small>{user?.role || 'Staff'}</small></div>
@@ -191,8 +211,10 @@ function App() {
         {menuOpen && <button className="mobile-nav-backdrop" aria-label="Close navigation menu" onClick={() => setMenuOpen(false)} />}
         <header className="topbar">
           <button className="icon-button mobile-menu" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button>
-          <div className="breadcrumb">ESTG TSS <ChevronRight size={15} /> <strong>{page}</strong></div>
+          <div className="breadcrumb">ESTG TSS <ChevronRight size={15} /> <strong>{translate(language, page)}</strong></div>
           <div className="top-actions">
+            <label className="language-picker" aria-label="Choose language"><Languages size={15} /><select value={language} onChange={(event) => updateLanguage(event.target.value)}><option value="en">English</option><option value="rw">Kinyarwanda</option><option value="fr">Français</option></select></label>
+            <button className="icon-button" aria-label={theme === 'day' ? 'Switch to night mode' : 'Switch to day mode'} title={theme === 'day' ? 'Night mode' : 'Day mode'} onClick={toggleTheme}>{theme === 'day' ? <Moon size={17} /> : <Sun size={17} />}</button>
             <div className="global-search-wrap"><label className="global-search"><Search size={17} /><input placeholder="Search students..." value={search} onChange={(event) => setSearch(event.target.value)} /></label>{search.trim() && <div className="global-results" role="listbox">{filteredStudents.slice(0, 6).map((student) => <button key={student.id} role="option" onClick={() => { setSelectedStudentId(student.id); setSearch('') }}><span className="avatar">{student.full_name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{student.full_name}</strong><small>{student.student_number} · {student.level} · {student.trade} {student.class_name}</small></span></button>)}{!filteredStudents.length && <p>No matching students.</p>}</div>}</div>
             <button className="icon-button notification-button" aria-label="Notifications"><Bell size={18} /><i /></button>
             <div className="top-user"><div className="avatar">{user?.name?.[0] || 'P'}</div><span>{user?.name || 'Patron'}<small>{user?.role || 'Staff'}</small></span><ChevronDown size={15} /></div>
@@ -206,9 +228,10 @@ function App() {
           {page === 'Students' && <StudentsPage students={filteredStudents} classes={schoolClasses} onOpenProfile={setSelectedStudentId} readOnly={user?.role === 'Read-only Staff'} onCreate={(body) => mutate('/students', 'POST', body, 'Student registered successfully.')} onUpdate={(id, body) => mutate(`/students/${id}`, 'PATCH', body, 'Student details updated.')} />}
           {page === 'Attendance' && <AttendancePage token={token} students={students} classes={schoolClasses} permissions={permissions} readOnly={user?.role === 'Read-only Staff'} onSaved={refresh} notify={setNotice} reportError={setError} />}
           {page === 'Permissions' && <PermissionsPage token={token} students={students} classes={schoolClasses} permissions={permissions} onRefresh={refresh} notify={setNotice} reportError={setError} user={user} />}
-          {page === 'Behaviour' && <BehaviourPage students={students} records={behaviour} onCreate={(body) => mutate('/behaviour', 'POST', body, 'Behaviour record saved.')} readOnly={user?.role === 'Read-only Staff'} />}
+          {page === 'Behaviour' && <BehaviourPage token={token} user={user} students={students} records={behaviour} onCreate={(body) => mutate('/behaviour', 'POST', body, 'Behaviour record saved.')} onRefresh={refresh} notify={setNotice} reportError={setError} readOnly={user?.role === 'Read-only Staff'} />}
           {page === 'Reports' && <ReportsPage token={token} students={students} classes={schoolClasses} attendance={attendance} permissions={permissions} behaviour={behaviour} />}
           {page === 'Settings' && <SettingsPage token={token} user={user} classes={schoolClasses} onCreateClass={(body) => mutate('/classes', 'POST', body, 'School class added.')} reportError={setError} notify={setNotice} />}
+          {page === 'Student Life' && <StudentLifePage token={token} user={user} reportError={setError} notify={setNotice} />}
         </div>
       </main>
       {selectedStudentId && <StudentProfile token={token} studentId={selectedStudentId} onClose={() => setSelectedStudentId(null)} />}
@@ -216,11 +239,88 @@ function App() {
   )
 }
 
-function Login({ onLogin }) {
+function StudentLifePage({ token, user, reportError, notify }) {
+  const [posts, setPosts] = useState([])
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [media, setMedia] = useState(null)
+  const [publishing, setPublishing] = useState(false)
+  const canPublish = user?.role === 'Administrator'
+  useEffect(() => {
+    let cancelled = false
+    request('/school-life/posts', { token })
+      .then((data) => { if (!cancelled) setPosts(data.posts) })
+      .catch((error) => { if (!cancelled) reportError(error.message) })
+    return () => { cancelled = true }
+  }, [token, reportError])
+
+  async function publish(event) {
+    event.preventDefault()
+    if (!media) {
+      reportError('Choose an image or video to publish.')
+      return
+    }
+    setPublishing(true)
+    const formElement = event.currentTarget
+    try {
+      const mediaData = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = () => reject(new Error('The selected media could not be read.'))
+        reader.readAsDataURL(media)
+      })
+      const result = await request('/school-life/posts', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ title, description, mediaData, mediaType: media.type }),
+      })
+      setPosts((current) => [result.post, ...current])
+      setTitle('')
+      setDescription('')
+      setMedia(null)
+      formElement.reset()
+      notify('Your post is now visible to everyone using the site.')
+    } catch (error) {
+      reportError(error.message)
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const clubs = [
+    { name: 'ICT & Innovation Club', focus: 'Technology, coding, and creative problem-solving', description: 'Students explore digital skills through practical projects, peer learning, and building useful ideas together.' },
+    { name: 'Creative Arts & Culture Club', focus: 'Art, music, performance, and cultural exchange', description: 'A welcoming place to share creative talents, celebrate Rwandan culture, and collaborate on school performances and exhibitions.' },
+  ]
+  return <>
+    <PageHeading eyebrow="ESTG COMMUNITY" title="Student Life" description="Discover clubs, celebrate student activities, and keep up with school news." />
+    <section className="student-life-intro panel">
+      <div><span className="eyebrow">A PLACE TO BELONG</span><h2>Learn beyond the classroom.</h2><p>Join a club, share your ideas, and take part in the experiences that make school life memorable.</p></div>
+      <div className="club-grid">{clubs.map((club) => <article className="club-card" key={club.name}><div className="club-card-icon"><Users size={20} /></div><h3>{club.name}</h3><strong>{club.focus}</strong><p>{club.description}</p></article>)}</div>
+    </section>
+    {canPublish && <section className="panel student-life-publisher"><div className="panel-heading"><div><h2>Publish to the school community</h2><p>Posts are shared with everyone who visits Student Life; you can stay signed in while managing the site.</p></div><ShieldCheck size={19} /></div><form className="post-form" onSubmit={publish}><div className="field-grid two"><label>Post title<input required maxLength="160" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="A short, clear title" /></label><label>Photo or video<input required type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" onChange={(event) => { const selected = event.target.files?.[0]; if (selected && selected.size > 8 * 1024 * 1024) { reportError('Choose a media file smaller than 8 MB.'); event.target.value = ''; setMedia(null); return } setMedia(selected || null) }} /></label></div><label>What is happening?<textarea required maxLength="2000" rows="3" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Add a short description for students and staff." /></label><button className="primary-button" disabled={publishing || !media}>{publishing ? 'Publishing…' : 'Publish for everyone'}<ArrowUpRight size={15} /></button></form></section>}
+    <section className="community-posts"><div className="section-title"><div><h2>From our community</h2><p>Photos and videos published by ESTG administrators.</p></div></div>{posts.length ? <div className="post-grid">{posts.map((post) => <article className="panel community-post" key={post.id}>{post.media_type.startsWith('video/') ? <video controls preload="metadata" src={post.media_data} /> : <img src={post.media_data} alt={post.title} loading="lazy" />}<div className="community-post-copy"><small>{post.author_name} · {new Date(post.created_at).toLocaleDateString()}</small><h3>{post.title}</h3><p>{post.description}</p></div></article>)}</div> : <EmptyState message="School news and activities will appear here when shared." />}</section>
+    <footer className="student-life-footer"><span>ESTG TSS · Growing together</span><a href="https://www.instagram.com/" target="_blank" rel="noreferrer" aria-label="Open Instagram"><InstagramLogo /><span>Instagram</span></a></footer>
+  </>
+}
+
+function InstagramLogo() {
+  return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r=".8" fill="currentColor" stroke="none" /></svg>
+}
+
+function Login({ onLogin, language, onLanguageChange }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [latestPosts, setLatestPosts] = useState([])
+  const [postsError, setPostsError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    request('/school-life/posts?limit=2')
+      .then((data) => { if (!cancelled) setLatestPosts(data.posts) })
+      .catch((feedError) => { if (!cancelled) setPostsError(feedError.message) })
+    return () => { cancelled = true }
+  }, [])
   async function submit(event) {
     event.preventDefault()
     setLoading(true)
@@ -237,19 +337,20 @@ function Login({ onLogin }) {
   return (
     <main className="login-page">
       <div className="login-card">
+        <label className="login-language-picker">Language<select value={language} onChange={(event) => onLanguageChange(event.target.value)}><option value="en">English</option><option value="rw">Kinyarwanda</option><option value="fr">Français</option></select></label>
         <div className="login-logo"><GraduationCap size={27} /></div>
-        <p className="eyebrow">ESTG TSS · SCHOOL PATRON</p>
-        <h1>Welcome back</h1>
+        <p className="eyebrow">ESTG TSS · {translate(language, 'School life').toUpperCase()}</p>
+        <h1>{translate(language, 'Welcome back')}</h1>
         <p className="login-subtitle">Sign in to manage your school community.</p>
         {error && <div className="form-error" role="alert">{error}</div>}
         <form onSubmit={submit}>
           <label>Email / username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Email or username" /></label>
           <label>Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label>
-          <button className="primary-button full-button" disabled={loading}>{loading ? 'Signing in...' : 'Sign in'}<ArrowUpRight size={17} /></button>
+          <button className="primary-button full-button" disabled={loading}>{loading ? 'Signing in...' : translate(language, 'Sign in')}<ArrowUpRight size={17} /></button>
         </form>
-        <p className="login-footnote">Use the administrator account configured for this installation.</p>
+        <p className="login-footnote">Sign in with the account provided by your school. Never share your password.</p>
       </div>
-      <div className="login-decoration"><span>01 / SCHOOL LIFE</span><strong>Every student<br />seen. Every day.</strong><p>A calmer way to keep track of the moments that matter.</p><div className="decoration-line" /></div>
+      <div className="login-decoration"><span>01 / ESTG STUDENT LIFE</span><strong>Every student<br />seen. Every day.</strong><p>A welcoming school community for learning, creativity, and shared experiences.</p><div className="login-club-preview"><span>ICT & Innovation Club</span><span>Creative Arts & Culture Club</span></div>{postsError && <p className="login-feed-error" role="status">School updates are temporarily unavailable. {postsError}</p>}{latestPosts.length > 0 && <div className="login-post-preview"><span>Latest from ESTG</span>{latestPosts.map((post) => <article key={post.id}>{post.media_type.startsWith('video/') ? <video muted playsInline preload="metadata" src={post.media_data} /> : <img src={post.media_data} alt="" loading="lazy" />}<strong>{post.title}</strong><small>{post.description}</small></article>)}</div>}<div className="decoration-line" /></div>
     </main>
   )
 }
@@ -482,8 +583,9 @@ function PermissionsPage({ token, students, classes, permissions, onRefresh, not
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState('')
   const [form, setForm] = useState({ level: '', trade: '', className: '', studentId: '', departureAt: '', expectedReturnAt: '', reason: '', destination: '', notes: '' })
-  const canApprove = ['Administrator', 'Authorized Approver'].includes(user?.role)
+  const canApprove = user?.role === 'Administrator'
   const canWrite = user?.role !== 'Read-only Staff'
+  const canRequest = user?.role === 'Patron'
   useEffect(() => {
     if (!selectedPermissionId) return undefined
     let cancelled = false
@@ -505,27 +607,27 @@ function PermissionsPage({ token, students, classes, permissions, onRefresh, not
     try {
       await request('/permissions', { token, method: 'POST', body: JSON.stringify(form) })
       await onRefresh()
-      notify('Permission request recorded.')
+      notify('Permission request sent to the administrator for review.')
       setShowForm(false)
     } catch (error) { reportError(error.message) }
   }
   const list = permissions.filter((item) => statusFilter === 'All statuses' || item.status === statusFilter)
   return <>
-    <PageHeading eyebrow="STUDENT MOVEMENT" title="Permissions" description="Record, approve, and track students leaving school." action={canWrite && <button className="primary-button" onClick={() => setShowForm(true)}><Plus size={17} />New permission</button>} />
-    <div className="permission-stats"><div className="panel"><span className="stat-label">Pending approval</span><strong>{permissions.filter((item) => item.status === 'Pending').length}</strong><small>Awaiting an authorized decision</small></div><div className="panel"><span className="stat-label">Currently away</span><strong>{permissions.filter((item) => item.status === 'Departed').length}</strong><small>Approved and not yet returned</small></div><div className="panel"><span className="stat-label">Overdue returns</span><strong>{permissions.filter((item) => item.overdue).length}</strong><small>Expected return time has passed</small></div></div>
+    <PageHeading eyebrow="STUDENT MOVEMENT" title="Permissions" description="Patrons request student leave; an administrator reviews each request." action={canRequest && <button className="primary-button" onClick={() => setShowForm(true)}><Plus size={17} />Request permission</button>} />
+    <div className="permission-stats"><div className="panel"><span className="stat-label">Pending review</span><strong>{permissions.filter((item) => item.status === 'Pending').length}</strong><small>Sent to the administrator</small></div><div className="panel"><span className="stat-label">Currently away</span><strong>{permissions.filter((item) => item.status === 'Departed').length}</strong><small>Approved and not yet returned</small></div><div className="panel"><span className="stat-label">Overdue returns</span><strong>{permissions.filter((item) => item.overdue).length}</strong><small>Expected return time has passed</small></div></div>
     <section className="panel table-panel"><div className="table-toolbar"><div><h2>Permission register</h2><p>Permission records are retained in each student’s history.</p></div><select className="compact-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{['All statuses', 'Pending', 'Approved', 'Rejected', 'Departed', 'Returned', 'Expired'].map((value) => <option key={value}>{value}</option>)}</select></div>
       <div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>CLASS</th><th>REASON / DESTINATION</th><th>DEPARTURE</th><th>RETURN / DUE</th><th>APPROVED BY</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>{list.map((item) => <tr key={item.id}><td><button className="permission-student-link" onClick={() => { setSelectedPermissionId(item.id); setPermissionDetails(null); setDetailsError(''); setDetailsLoading(true) }} aria-label={`View permission history for ${item.full_name}`}><strong>{item.full_name}</strong></button><small className="sub-cell">{item.student_number}</small></td><td>{item.level} · {item.trade}<small className="sub-cell">{item.class_name}</small></td><td>{item.reason}<small className="sub-cell">{item.destination || 'Destination not given'}</small></td><td>{formatDateTime(item.actual_departure_at || item.departure_at)}</td><td>{formatDateTime(item.actual_return_at || item.expected_return_at)}<small className="sub-cell">{item.actual_return_at ? 'Returned' : 'Expected'}</small></td><td>{item.approved_by || '—'}</td><td><StatusBadge status={item.overdue ? 'Overdue' : item.status} /></td><td><div className="inline-actions">{item.status === 'Pending' && canApprove && <><button className="mini-action approve" onClick={() => updatePermission(item.id, 'approve')}>Approve</button><button className="mini-action reject" onClick={() => updatePermission(item.id, 'reject')}>Reject</button></>}{canWrite && item.status === 'Approved' && <button className="mini-action approve" onClick={() => updatePermission(item.id, 'depart')}>Record departure</button>}{canWrite && item.status === 'Departed' && <button className="mini-action approve" onClick={() => updatePermission(item.id, 'return')}>Record return</button>}{item.status === 'Pending' && !canApprove && <span className="muted-cell">Awaiting approval</span>}</div></td></tr>)}</tbody></table></div>
       {!list.length && <EmptyState message="No permission records match this filter." />}
     </section>
     {selectedPermissionId && <PermissionDetails data={permissionDetails} loading={detailsLoading} error={detailsError} onClose={() => { setSelectedPermissionId(null); setPermissionDetails(null); setDetailsLoading(false) }} />}
-    {showForm && <Modal title="Record student permission" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={submit}>
+    {showForm && <Modal title="Request student permission" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={submit}>
       <ClassFields values={form} onChange={setForm} classes={classes} />
       <label>Student<select required disabled={!form.className} value={form.studentId} onChange={(event) => setForm({ ...form, studentId: event.target.value })}><option value="">Choose a student</option>{students.filter((student) => student.status === 'Active' && student.level === form.level && student.trade === form.trade && student.class_name === form.className).map((student) => <option value={student.id} key={student.id}>{student.full_name} · {student.student_number}</option>)}</select></label>
       <div className="field-grid two"><label>Departure date & time<input required type="datetime-local" value={form.departureAt} onChange={(event) => setForm({ ...form, departureAt: event.target.value })} /></label><label>Expected return<input required type="datetime-local" value={form.expectedReturnAt} onChange={(event) => setForm({ ...form, expectedReturnAt: event.target.value })} /></label></div>
       <div className="field-grid two"><label>Reason<textarea required rows="2" value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /></label><label>Destination<input value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></label></div>
       <label>Additional notes<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-      <p className="form-note"><ShieldCheck size={15} /> This request will remain pending until an authorized approver approves it.</p>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Submit for approval</button></div>
+      <p className="form-note"><ShieldCheck size={15} /> The student is not approved yet. This request will be sent to the administrator for a decision.</p>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Send to administrator</button></div>
     </form></Modal>}
   </>
 }
@@ -542,23 +644,51 @@ function PermissionDetails({ data, loading, error, onClose }) {
   </Modal>
 }
 
-function BehaviourPage({ students, records, onCreate, readOnly }) {
+function BehaviourPage({ token, user, students, records, onCreate, onRefresh, notify, reportError, readOnly }) {
   const [showForm, setShowForm] = useState(false)
   const [filter, setFilter] = useState('All records')
+  const [removalRequests, setRemovalRequests] = useState([])
   const [form, setForm] = useState({ studentId: '', kind: 'Positive', category: '', points: 3, description: '', severity: 'Low', actionTaken: '' })
   const list = records.filter((record) => filter === 'All records' || record.kind === filter)
+  const isPatron = user?.role === 'Patron'
+  useEffect(() => {
+    if (user?.role !== 'Administrator') return undefined
+    let cancelled = false
+    request('/behaviour/removal-requests', { token })
+      .then((data) => { if (!cancelled) setRemovalRequests(data.requests) })
+      .catch((error) => { if (!cancelled) reportError(error.message) })
+    return () => { cancelled = true }
+  }, [token, user?.role, reportError])
   async function submit(event) {
     event.preventDefault()
     const saved = await onCreate(form)
     if (saved) setShowForm(false)
   }
+  async function requestMarkRemoval(record) {
+    const reason = window.prompt(`Why should ${record.kind.toLowerCase()} mark "${record.category}" for ${record.full_name} be removed?`)
+    if (!reason?.trim()) return
+    try {
+      await request(`/behaviour/${record.kind}/${record.id}/removal-requests`, { token, method: 'POST', body: JSON.stringify({ reason }) })
+      notify('Removal request sent to the administrator.')
+    } catch (error) { reportError(error.message) }
+  }
+  async function reviewRemovalRequest(id, action) {
+    try {
+      await request(`/behaviour/removal-requests/${id}/${action}`, { token, method: 'POST' })
+      const data = await request('/behaviour/removal-requests', { token })
+      setRemovalRequests(data.requests)
+      await onRefresh()
+      notify(action === 'approve' ? 'Mark removed after administrator review.' : 'Removal request rejected.')
+    } catch (error) { reportError(error.message) }
+  }
   return <>
     <PageHeading eyebrow="STUDENT WELLBEING" title="Behaviour & recognition" description="Recognize positive choices and keep a fair, traceable incident history." action={!readOnly && <button className="primary-button" onClick={() => setShowForm(true)}><Plus size={17} />Add a record</button>} />
     <div className="behaviour-callout"><div className="callout-icon"><Activity size={21} /></div><div><strong>Build a culture of encouragement</strong><p>Use points to recognize growth and positive contributions—not to publicly shame students.</p></div></div>
     <section className="panel table-panel"><div className="table-toolbar"><div><h2>Behaviour history</h2><p>Every addition and deduction includes a reason and the staff member who recorded it.</p></div><select className="compact-select" value={filter} onChange={(event) => setFilter(event.target.value)}><option>All records</option><option>Positive</option><option>Incident</option></select></div>
-      <div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>RECORD TYPE</th><th>DETAILS</th><th>DATE</th><th>RECORDED BY</th><th>POINTS</th></tr></thead><tbody>{list.map((item) => <tr key={item.id}><td><strong>{item.full_name}</strong><small className="sub-cell">{item.level} · {item.trade} · {item.class_name}</small></td><td><span className={`status-pill ${item.kind === 'Positive' ? 'returned' : 'rejected'}`}>{item.kind}</span></td><td><strong>{item.category}</strong><small className="sub-cell">{item.description}</small></td><td>{new Date(item.created_at).toLocaleDateString()}</td><td>{item.recorded_by}</td><td className={`points-change ${item.points > 0 ? 'positive-points' : 'negative-points'}`}>{item.points > 0 ? '+' : ''}{item.points}</td></tr>)}</tbody></table></div>
+      <div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>RECORD TYPE</th><th>DETAILS</th><th>DATE</th><th>RECORDED BY</th><th>POINTS</th>{isPatron && <th>ACTION</th>}</tr></thead><tbody>{list.map((item) => <tr key={`${item.kind}-${item.id}`}><td><strong>{item.full_name}</strong><small className="sub-cell">{item.level} · {item.trade} · {item.class_name}</small></td><td><span className={`status-pill ${item.kind === 'Positive' ? 'returned' : 'rejected'}`}>{item.kind}</span></td><td><strong>{item.category}</strong><small className="sub-cell">{item.description}</small></td><td>{new Date(item.created_at).toLocaleDateString()}</td><td>{item.recorded_by}</td><td className={`points-change ${item.points > 0 ? 'positive-points' : 'negative-points'}`}>{item.points > 0 ? '+' : ''}{item.points}</td>{isPatron && <td><button className="mini-action reject" onClick={() => requestMarkRemoval(item)}>Request removal</button></td>}</tr>)}</tbody></table></div>
       {!list.length && <EmptyState message="No behaviour records yet. Positive actions deserve recognition." />}
     </section>
+    {user?.role === 'Administrator' && <section className="panel table-panel mark-removal-queue"><div className="table-toolbar"><div><h2>Patron mark-removal requests</h2><p>Review requests before a behaviour mark is permanently removed.</p></div><span className="status-pill pending">{removalRequests.filter((item) => item.status === 'Pending').length} pending</span></div><div className="table-scroll"><table><thead><tr><th>STUDENT</th><th>MARK</th><th>REASON FROM PATRON</th><th>REQUESTED BY</th><th>STATUS / DECISION</th></tr></thead><tbody>{removalRequests.map((item) => <tr key={item.id}><td>{item.full_name}<small className="sub-cell">{item.student_number}</small></td><td>{item.record_kind} · #{item.record_id}</td><td>{item.reason}</td><td>{item.requested_by}</td><td>{item.status === 'Pending' ? <div className="inline-actions"><button className="mini-action approve" onClick={() => reviewRemovalRequest(item.id, 'approve')}>Approve removal</button><button className="mini-action reject" onClick={() => reviewRemovalRequest(item.id, 'reject')}>Reject</button></div> : <StatusBadge status={item.status} />}</td></tr>)}</tbody></table></div>{!removalRequests.length && <EmptyState message="There are no mark-removal requests." />}</section>}
     {showForm && <Modal title="Add behaviour record" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={submit}>
       <label>Student<select required value={form.studentId} onChange={(event) => setForm({ ...form, studentId: event.target.value })}><option value="">Choose a student</option>{students.filter((student) => student.status === 'Active').map((student) => <option key={student.id} value={student.id}>{student.full_name} · {student.student_number} · {student.level} {student.trade}</option>)}</select></label>
       <div className="field-grid two"><label>Record type<select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value, points: event.target.value === 'Positive' ? 3 : -1 })}><option>Positive</option><option>Incident</option></select></label><label>{form.kind === 'Positive' ? 'Points awarded' : 'Points deducted'}<input required type="number" min="1" max="50" value={Math.abs(form.points)} onChange={(event) => setForm({ ...form, points: (form.kind === 'Positive' ? 1 : -1) * Number(event.target.value) })} /></label></div>
@@ -680,7 +810,7 @@ function SettingsPage({ token, user, classes, onCreateClass, reportError, notify
   }
   return <>
     <PageHeading eyebrow="PREFERENCES" title="Settings" description="School structure and account access for this workspace." />
-    <div className="settings-grid"><section className="panel settings-card"><div className="settings-card-heading"><div className="settings-icon"><GraduationCap size={20} /></div>{user?.role === 'Administrator' && <button className="secondary-button" onClick={() => setShowClassForm(true)}><Plus size={14} />Add class</button>}</div><h2>School structure</h2><p>Student classes are filtered by level and trade throughout the system.</p><div className="structure-list">{levels.map((level) => <div key={level}><strong>{level}</strong><span>{trades.map((trade) => `${trade} · ${classes.filter((item) => item.level === level && item.trade === trade).map((item) => item.class_name).join(', ') || 'No classes'}`).join('  |  ')}</span></div>)}</div><small className="settings-note">{user?.role === 'Administrator' ? 'Add a class to update student registration and attendance options.' : 'School structure changes are managed by your system administrator.'}</small></section><section className="panel settings-card"><div className="settings-icon green"><UserRound size={20} /></div><h2>Your account</h2><p>Signed in identity and permissions for this session.</p><div className="account-detail"><span>Name</span><strong>{user?.name}</strong></div><div className="account-detail"><span>Username</span><strong>{user?.username}</strong></div><div className="account-detail"><span>Role</span><strong><StatusBadge status={user?.role} /></strong></div><div className="access-note"><ShieldCheck size={16} />Permission approval is restricted to authorized approvers and administrators.</div></section><section className="panel settings-card"><div className="settings-icon green"><LockKeyhole size={20} /></div><h2>Change password</h2><p>Choose a new password with at least 12 characters. Your current password is required to confirm this change.</p>{passwordError && <div className="form-error" role="alert">{passwordError}</div>}<form className="settings-password-form" onSubmit={changePassword}><label>Current password<input required type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label><label>New password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label><label>Confirm new password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label><button className="primary-button"><LockKeyhole size={15} />Update password</button></form></section></div>
+    <div className="settings-grid"><section className="panel settings-card"><div className="settings-card-heading"><div className="settings-icon"><GraduationCap size={20} /></div>{user?.role === 'Administrator' && <button className="secondary-button" onClick={() => setShowClassForm(true)}><Plus size={14} />Add class</button>}</div><h2>School structure</h2><p>Student classes are filtered by level and trade throughout the system.</p><div className="structure-list">{levels.map((level) => <div key={level}><strong>{level}</strong><span>{trades.map((trade) => `${trade} · ${classes.filter((item) => item.level === level && item.trade === trade).map((item) => item.class_name).join(', ') || 'No classes'}`).join('  |  ')}</span></div>)}</div><small className="settings-note">{user?.role === 'Administrator' ? 'Add a class to update student registration and attendance options.' : 'School structure changes are managed by your system administrator.'}</small></section><section className="panel settings-card"><div className="settings-icon green"><UserRound size={20} /></div><h2>Your account</h2><p>Signed in identity and permissions for this session.</p><div className="account-detail"><span>Name</span><strong>{user?.name}</strong></div><div className="account-detail"><span>Username</span><strong>{user?.username}</strong></div><div className="account-detail"><span>Role</span><strong><StatusBadge status={user?.role} /></strong></div><div className="access-note"><ShieldCheck size={16} />Patrons submit permissions; only an administrator makes the final approval decision.</div></section><section className="panel settings-card"><div className="settings-icon green"><LockKeyhole size={20} /></div><h2>Change password</h2><p>Choose a new password with at least 12 characters. Your current password is required to confirm this change.</p>{passwordError && <div className="form-error" role="alert">{passwordError}</div>}<form className="settings-password-form" onSubmit={changePassword}><label>Current password<input required type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} /></label><label>New password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} /></label><label>Confirm new password<input required minLength="12" type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} /></label><button className="primary-button"><LockKeyhole size={15} />Update password</button></form></section></div>
     {user?.role === 'Administrator' && <section className="panel table-panel user-management"><div className="table-toolbar"><div><h2>User management</h2><p>Grant the least access required for each staff member.</p></div><button className="primary-button" onClick={() => setShowForm(true)}><Plus size={16} />Add user</button></div><div className="table-scroll"><table><thead><tr><th>NAME</th><th>USERNAME</th><th>ROLE</th><th>ADDED</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.name}</strong></td><td>{account.username}</td><td><StatusBadge status={account.role} /></td><td>{new Date(account.created_at).toLocaleDateString()}</td></tr>)}</tbody></table></div></section>}
     {showForm && <Modal title="Create user account" onClose={() => setShowForm(false)}><form className="modal-form" onSubmit={createUser}><label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Username<input required autoComplete="off" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><div className="field-grid two"><label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option>Patron</option><option>Authorized Approver</option><option>Read-only Staff</option><option>Administrator</option></select></label><label>Password (12+ characters)<input required minLength="12" type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button">Create account</button></div></form></Modal>}
     {showClassForm && <Modal title="Add a school class" onClose={() => setShowClassForm(false)}><form className="modal-form" onSubmit={createClass}><div className="field-grid two"><label>Level<select value={classForm.level} onChange={(event) => setClassForm({ ...classForm, level: event.target.value })}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label><label>Trade<select value={classForm.trade} onChange={(event) => setClassForm({ ...classForm, trade: event.target.value })}>{trades.map((trade) => <option key={trade}>{trade}</option>)}</select></label></div><label>Class name<input required pattern="Class [A-Z]" title="Use a name such as Class C" value={classForm.className} onChange={(event) => setClassForm({ ...classForm, className: event.target.value })} placeholder="Class C" /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowClassForm(false)}>Cancel</button><button className="primary-button">Add class</button></div></form></Modal>}

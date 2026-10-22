@@ -18,7 +18,7 @@ A React and Express application for student registration, daily attendance, stud
 
 ## Install as a mobile app
 
-The Vite build produces an installable PWA named **ETG TSS**. The install banner appears only when the browser offers installation; on iPhone and iPad it provides Safari **Share → Add to Home Screen** steps. The app shell and static assets are precached. Authenticated API calls, records, and credentials are not cached, so attendance and other live data require the API, MySQL, and a network connection.
+The Vite build produces an installable PWA named **ESTG TSS**. The install banner appears only when the browser offers installation; on iPhone and iPad it provides Safari **Share → Add to Home Screen** steps. The app shell and static assets are precached. Student records and credentials are not cached, so attendance and other live data require the API, MySQL, and a network connection.
 
 The home-screen icons are generated from the graduation-cap mark already used in the app interface. No official school logo asset was present in the project. Replace the two PNGs under `public/icons/` with approved school artwork if provided, keeping both required dimensions and filenames.
 
@@ -39,7 +39,7 @@ npm run preview
 
 If the host requires SPA rewrites, send frontend navigation requests to `index.html`. When the API shares the same domain, route `/api/*` to Express before applying that fallback so API responses are never replaced by the frontend shell.
 
-On Android, visit the HTTPS site in Chrome and choose **Install ETG TSS App** when offered. On iPhone/iPad, open the HTTPS site in Safari, tap **Share**, then **Add to Home Screen**. Launch the new icon; the browser address bar is hidden when `display-mode: standalone` is active.
+On Android, visit the HTTPS site in Chrome and choose **Install ESTG TSS App** when offered. On iPhone/iPad, open the HTTPS site in Safari, tap **Share**, then **Add to Home Screen**. Launch the new icon; the browser address bar is hidden when `display-mode: standalone` is active.
 
 The first server start creates the schema, seeds the currently configured level/trade/class combinations, and creates the initial administrator if that username does not already exist. The initial administrator password is hashed with bcrypt. The bootstrap account uses the configured `ADMIN_USERNAME` and `ADMIN_PASSWORD`; the bootstrap password must be at least 8 characters. This bootstrap-only minimum is weaker than the 12-character requirement for subsequently created accounts, so use a strong password before production. If you need to reset an existing bootstrap administrator's password, set `RESET_ADMIN_PASSWORD=true` alongside `ADMIN_USERNAME` and the new `ADMIN_PASSWORD`, deploy/restart the API once, then remove `RESET_ADMIN_PASSWORD` from the environment. After first startup, remove the bootstrap `ADMIN_PASSWORD` and `ADMIN_NAME` values from the environment; create further accounts through the authenticated admin user API.
 
@@ -65,8 +65,10 @@ The first server start creates the schema, seeds the currently configured level/
 - Global student search and student profiles with personal, attendance, permission, discipline, behaviour-point, and summary tabs.
 - School structure: Levels 3–5; SOD classes A and B at all levels; ELET class A at Levels 3–4 and classes A and B at Level 5.
 - Roll call with **Present**, **Absent**, **Late**, **Authorized Away**, and **Not Marked** statuses. Unmarked students are never counted as present. The register clearly reports when attendance has not been recorded; an all-unmarked class cannot be saved as attendance.
-- Permission requests with role-restricted approval/rejection and recorded departure/return actions. Permission rows open the full request details and audit history, including actual return time.
-- Behaviour awards and incident deductions with reasons and staff attribution.
+- Patron-submitted permission requests with administrator-only approval/rejection and recorded departure/return actions. Permission rows open the full request details and audit history, including actual return time.
+- Behaviour awards and incident deductions with reasons and staff attribution. Patrons can request mark removals; administrators review and audit those requests.
+- Student Life with two club descriptions and school-wide administrator posts. Published images and videos appear on the public sign-in page and Student Life; uploads are limited to 8 MB.
+- English, Kinyarwanda, and French selectors for navigation/sign-in, plus a saved day/night appearance toggle.
 - Attendance date-range reports, permission and behaviour views with CSV export and print support.
 - Administrator, Patron, Authorized Approver, and Read-only Staff roles. Student/attendance/permission/behaviour write endpoints reject read-only accounts.
 - Account holders can change their own password from Settings after confirming their current password; new passwords must be at least 12 characters.
@@ -74,15 +76,18 @@ The first server start creates the schema, seeds the currently configured level/
 
 ## REST API
 
-All routes except `POST /api/auth/login` require a bearer token.
+All routes except `POST /api/auth/login` and `GET /api/school-life/posts` require a bearer token.
 
 - `POST /api/auth/login`; `GET /api/auth/me`; authenticated `POST /api/auth/change-password`
 - `GET /api/classes`
 - Administrator only: `POST /api/classes`
 - `GET/POST /api/students`; `PATCH /api/students/:id`; `GET /api/students/:id/profile`
 - `GET/POST /api/attendance`
-- `GET/POST /api/permissions`; `POST /api/permissions/:id/{approve,reject,depart,return}`
+- `GET/POST /api/permissions`; permission creation is Patron-only, approval/rejection is Administrator-only; `POST /api/permissions/:id/{approve,reject,depart,return}`
 - `GET/POST /api/behaviour`
+- Patron only: `POST /api/behaviour/:kind/:id/removal-requests`
+- Administrator only: `GET /api/behaviour/removal-requests`; `POST /api/behaviour/removal-requests/:id/{approve,reject}`
+- `GET /api/school-life/posts`; Administrator only: `POST /api/school-life/posts` (image/video data URL, max 8 MB)
 - `GET /api/dashboard?date=YYYY-MM-DD`
 - Administrator only: `GET/POST /api/users`
 

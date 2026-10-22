@@ -31,6 +31,54 @@ const pool = mysql.createPool({
   timezone: 'Z',
 })
 
+app.get('/api/school-life/posts', async (_req, res, next) => {
+  try {
+    const limit = _req.query.limit === '2' ? 2 : 8
+    const [posts] = await pool.query(
+      `SELECT p.id, p.title, p.description, p.media_type, p.media_data, p.created_at, u.name AS author_name
+       FROM school_posts p JOIN users u ON u.id=p.posted_by ORDER BY p.created_at DESC LIMIT ${limit}`,
+    )
+    return res.json({ posts })
+  } catch (error) { return next(error) }
+})
+
+app.post('/api/school-life/posts', authenticate, requireRole('Administrator'), async (req, res, next) => {
+  const connection = await pool.getConnection()
+  let transactionStarted = false
+  try {
+    const { title, description, mediaType, mediaData } = req.body || {}
+    const allowedMediaTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm']
+    const match = typeof mediaData === 'string' ? mediaData.match(/^data:([^;]+);base64,([A-Za-z0-9+/]+={0,2})$/) : null
+    if (!title?.trim() || title.trim().length > 160 || !description?.trim() || description.trim().length > 2000) {
+      throw inputError('Provide a title (up to 160 characters) and a description (up to 2,000 characters).')
+    }
+    if (!allowedMediaTypes.includes(mediaType) || !match || match[1] !== mediaType) {
+      throw inputError('Choose a supported image or video file.')
+    }
+    if (Buffer.from(match[2], 'base64').length > 8 * 1024 * 1024) {
+      throw inputError('The image or video must be smaller than 8 MB.')
+    }
+    await connection.beginTransaction()
+    transactionStarted = true
+    const [result] = await connection.execute(
+      'INSERT INTO school_posts (title, description, media_type, media_data, posted_by) VALUES (?, ?, ?, ?, ?)',
+      [title.trim(), description.trim(), mediaType, mediaData, req.user.id],
+    )
+    await audit(connection, req.user.id, 'create', 'school_post', result.insertId, 'Published school community post', null, { title: title.trim(), mediaType })
+    const [[post]] = await connection.execute(
+      `SELECT p.id, p.title, p.description, p.media_type, p.media_data, p.created_at, u.name AS author_name
+       FROM school_posts p JOIN users u ON u.id=p.posted_by WHERE p.id=?`,
+      [result.insertId],
+    )
+    await connection.commit()
+    transactionStarted = false
+    return res.status(201).json({ post })
+  } catch (error) {
+    if (transactionStarted) await connection.rollback()
+    return next(error)
+  } finally { connection.release() }
+})
+
 const app = express()
 const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
   .split(',')
@@ -43,7 +91,7 @@ app.use(cors({
   },
 }))
 
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '12mb' }))
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -181,6 +229,33 @@ async function initializeDatabase() {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id),
       INDEX idx_audit_entity (entity, entity_id, created_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS school_posts (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(160) NOT NULL,
+      description TEXT NOT NULL,
+      media_type VARCHAR(80) NOT NULL,
+      media_data LONGTEXT NOT NULL,
+      posted_by BIGINT UNSIGNED NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_school_post_user FOREIGN KEY (posted_by) REFERENCES users(id),
+      INDEX idx_school_post_created (created_at)
+    ) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS mark_removal_requests (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      record_id BIGINT UNSIGNED NOT NULL,
+      record_kind ENUM('Positive','Incident') NOT NULL,
+      student_id BIGINT UNSIGNED NOT NULL,
+      reason TEXT NOT NULL,
+      status ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Pending',
+      requested_by BIGINT UNSIGNED NOT NULL,
+      reviewed_by BIGINT UNSIGNED NULL,
+      reviewed_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_mark_request_student FOREIGN KEY (student_id) REFERENCES students(id),
+      CONSTRAINT fk_mark_requester FOREIGN KEY (requested_by) REFERENCES users(id),
+      CONSTRAINT fk_mark_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id),
+      INDEX idx_mark_request_status (status, created_at)
     ) ENGINE=InnoDB`,
   ]
   for (const statement of statements) await pool.query(statement)
@@ -585,7 +660,7 @@ app.get('/api/permissions/:id', authenticate, async (req, res, next) => {
   } catch (error) { return next(error) }
 })
 
-app.post('/api/permissions', authenticate, requireWrite, async (req, res, next) => {
+app.post('/api/permissions', authenticate, requireRole('Patron'), async (req, res, next) => {
   const connection = await pool.getConnection()
   try {
     const { studentId, departureAt, expectedReturnAt, reason, destination, notes } = req.body || {}
@@ -625,9 +700,9 @@ app.post('/api/permissions/:id/:action', authenticate, requireWrite, async (req,
       const actionText = { approve: 'approved', reject: 'rejected', depart: 'marked departed', return: 'marked returned' }[action]
       throw inputError(`A ${permission.status.toLowerCase()} permission cannot be ${actionText}.`)
     }
-    if (['approve', 'reject'].includes(action) && !['Administrator', 'Authorized Approver'].includes(req.user.role)) {
+    if (['approve', 'reject'].includes(action) && req.user.role !== 'Administrator') {
       await connection.rollback()
-      return res.status(403).json({ error: 'Only an authorized approver or administrator can approve or reject permissions.' })
+      return res.status(403).json({ error: 'Only an administrator can review patron permission requests.' })
     }
     const nextStatus = transitions[action][1]
     if (action === 'approve') await connection.execute('UPDATE permission_records SET status=?, approved_by=?, approved_at=CURRENT_TIMESTAMP WHERE id=?', [nextStatus, req.user.id, req.params.id])
@@ -688,6 +763,79 @@ app.post('/api/behaviour', authenticate, requireWrite, async (req, res, next) =>
     await audit(connection, req.user.id, 'create', kind === 'Incident' ? 'discipline_incident' : 'behaviour_transaction', id, description.trim(), { balance: previousBalance }, { studentId, points: numericPoints, balance: previousBalance + numericPoints, kind, category })
     await connection.commit()
     return res.status(201).json({ id })
+  } catch (error) {
+    await connection.rollback()
+    return next(error)
+  } finally { connection.release() }
+})
+
+app.post('/api/behaviour/:kind/:id/removal-requests', authenticate, requireRole('Patron'), async (req, res, next) => {
+  const connection = await pool.getConnection()
+  try {
+    const kind = req.params.kind
+    const recordId = Number(req.params.id)
+    const { reason } = req.body || {}
+    if (!['Positive', 'Incident'].includes(kind) || !Number.isSafeInteger(recordId) || recordId < 1 || !reason?.trim()) {
+      throw inputError('Select a behaviour mark and explain why it should be removed.')
+    }
+    const [records] = kind === 'Positive'
+      ? await connection.execute('SELECT id, student_id FROM behaviour_transactions WHERE id=? AND incident_id IS NULL', [recordId])
+      : await connection.execute('SELECT id, student_id FROM discipline_incidents WHERE id=?', [recordId])
+    if (!records.length) throw inputError('That behaviour mark no longer exists.')
+    const [pending] = await connection.execute(
+      "SELECT id FROM mark_removal_requests WHERE record_kind=? AND record_id=? AND status='Pending'",
+      [kind, recordId],
+    )
+    if (pending.length) throw inputError('A removal request for this mark is already awaiting administrator review.')
+    const [result] = await connection.execute(
+      'INSERT INTO mark_removal_requests (record_id, record_kind, student_id, reason, requested_by) VALUES (?, ?, ?, ?, ?)',
+      [recordId, kind, records[0].student_id, reason.trim(), req.user.id],
+    )
+    await audit(connection, req.user.id, 'request_removal', 'behaviour_mark', recordId, reason.trim(), null, { status: 'Pending', kind })
+    return res.status(201).json({ id: result.insertId, status: 'Pending' })
+  } catch (error) { return next(error) }
+  finally { connection.release() }
+})
+
+app.get('/api/behaviour/removal-requests', authenticate, requireRole('Administrator'), async (_req, res, next) => {
+  try {
+    const [requests] = await pool.query(
+      `SELECT mr.id, mr.record_id, mr.record_kind, mr.student_id, mr.reason, mr.status, mr.created_at,
+       s.full_name, s.student_number, requester.name AS requested_by
+       FROM mark_removal_requests mr JOIN students s ON s.id=mr.student_id
+       JOIN users requester ON requester.id=mr.requested_by ORDER BY mr.created_at DESC`,
+    )
+    return res.json({ requests })
+  } catch (error) { return next(error) }
+})
+
+app.post('/api/behaviour/removal-requests/:id/:action', authenticate, requireRole('Administrator'), async (req, res, next) => {
+  const connection = await pool.getConnection()
+  try {
+    const { action } = req.params
+    if (!['approve', 'reject'].includes(action)) throw inputError('Choose approve or reject for this removal request.')
+    await connection.beginTransaction()
+    const [rows] = await connection.execute('SELECT * FROM mark_removal_requests WHERE id=? FOR UPDATE', [req.params.id])
+    if (!rows.length) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Mark removal request not found.' })
+    }
+    const removalRequest = rows[0]
+    if (removalRequest.status !== 'Pending') throw inputError(`This request is already ${removalRequest.status.toLowerCase()}.`)
+    const nextStatus = action === 'approve' ? 'Approved' : 'Rejected'
+    if (action === 'approve' && removalRequest.record_kind === 'Positive') {
+      await connection.execute('DELETE FROM behaviour_transactions WHERE id=? AND incident_id IS NULL', [removalRequest.record_id])
+    } else if (action === 'approve') {
+      await connection.execute('DELETE FROM behaviour_transactions WHERE incident_id=?', [removalRequest.record_id])
+      await connection.execute('DELETE FROM discipline_incidents WHERE id=?', [removalRequest.record_id])
+    }
+    await connection.execute(
+      'UPDATE mark_removal_requests SET status=?, reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?',
+      [nextStatus, req.user.id, removalRequest.id],
+    )
+    await audit(connection, req.user.id, action, 'behaviour_mark_removal', removalRequest.record_id, removalRequest.reason, { status: 'Pending' }, { status: nextStatus, recordKind: removalRequest.record_kind })
+    await connection.commit()
+    return res.json({ success: true, status: nextStatus })
   } catch (error) {
     await connection.rollback()
     return next(error)

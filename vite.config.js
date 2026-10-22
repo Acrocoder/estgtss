@@ -11,8 +11,8 @@ export default defineConfig({
       includeAssets: ['favicon.svg', 'icons/etg-tss-192.png'],
       manifest: {
         id: '/',
-        name: 'ETG TSS',
-        short_name: 'ETG TSS',
+        name: 'ESTG TSS',
+        short_name: 'ESTG TSS',
         description: 'ESTG TSS school patron system for student records, attendance, permissions, and behaviour.',
         start_url: '/',
         scope: '/',
