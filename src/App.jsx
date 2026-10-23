@@ -127,7 +127,7 @@ function App() {
         request(`/attendance?date=${today}`, { token }),
         request('/permissions', { token }),
         request('/behaviour', { token }),
-        ['Class Monitor', 'Teacher', 'Student'].includes(role) ? Promise.resolve(null) : request(`/dashboard?date=${today}`, { token }),
+        ['Patron', 'Class Monitor', 'Teacher', 'Student'].includes(role) ? Promise.resolve(null) : request(`/dashboard?date=${today}`, { token }),
         request('/reports', { token }),
       ])
       setUser(me.user)
@@ -203,13 +203,16 @@ function App() {
   }, [search, students])
   const visibleNavItems = navItems.filter(({ label }) => {
     if (user?.role === 'Student') return label === 'My Records'
+    if (user?.role === 'Patron') return ['Students', 'Attendance', 'Permissions', 'Reports'].includes(label)
     if (['Class Monitor', 'Teacher'].includes(user?.role)) {
       return ['Attendance', 'Daily Reports'].includes(label) && (label !== 'Attendance' || user?.role === 'Class Monitor')
     }
     if (user?.role === 'Administrator') return !['Daily Reports', 'My Records'].includes(label)
     return !['Daily Reports', 'Reports Inbox', 'School News'].includes(label)
   })
-  const activePage = page === 'Overview' && user?.role === 'Class Monitor'
+  const activePage = user?.role === 'Patron' && !['Students', 'Attendance', 'Permissions', 'Reports'].includes(page)
+    ? 'Attendance'
+    : page === 'Overview' && user?.role === 'Class Monitor'
     ? 'Attendance'
     : page === 'Overview' && user?.role === 'Teacher'
       ? 'Daily Reports'
@@ -264,7 +267,7 @@ function App() {
     <div className="app-shell" data-theme={theme}>
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <a className="brand" href="#" onClick={(event) => event.preventDefault()}>
-          <span className="brand-mark"><img src="/images/estg-logo.svg" alt="" /></span>
+          <span className="brand-mark"><img src="/icons/etg-tss-192.png" alt="" /></span>
           <span><strong>ESTG TSS</strong><small>Patron workspace</small></span>
         </a>
         <div className="nav-label">{translate(language, 'School life').toUpperCase()}</div>
@@ -280,8 +283,10 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-link" onClick={() => setShowPublicSite(true)}><ArrowUpRight size={18} /><span>View public website</span></button>
-          <button className={`nav-link ${page === 'Settings' ? 'active' : ''}`} onClick={() => { setPage('Settings'); setMenuOpen(false) }}><Settings size={18} /><span>{translate(language, 'Settings')}</span></button>
+          {user?.role !== 'Patron' && <>
+            <button className="nav-link" onClick={() => setShowPublicSite(true)}><ArrowUpRight size={18} /><span>View public website</span></button>
+            <button className={`nav-link ${page === 'Settings' ? 'active' : ''}`} onClick={() => { setPage('Settings'); setMenuOpen(false) }}><Settings size={18} /><span>{translate(language, 'Settings')}</span></button>
+          </>}
           <div className="sidebar-profile">
             <div className="avatar">{user?.name?.[0] || 'P'}</div>
             <div className="profile-copy"><strong>{user?.name || 'Patron'}</strong><small>{user?.role || 'Staff'}</small></div>
@@ -298,7 +303,7 @@ function App() {
             <label className="language-picker" aria-label="Choose language"><Languages size={15} /><select value={language} onChange={(event) => updateLanguage(event.target.value)}><option value="en">English</option><option value="rw">Kinyarwanda</option><option value="fr">Français</option></select></label>
             <button className="icon-button" aria-label={theme === 'day' ? 'Switch to night mode' : 'Switch to day mode'} title={theme === 'day' ? 'Night mode' : 'Day mode'} onClick={toggleTheme}>{theme === 'day' ? <Moon size={17} /> : <Sun size={17} />}</button>
             <div className="global-search-wrap"><label className="global-search"><Search size={17} /><input placeholder="Search students..." value={search} onChange={(event) => setSearch(event.target.value)} /></label>{search.trim() && <div className="global-results" role="listbox">{filteredStudents.slice(0, 6).map((student) => <button key={student.id} role="option" onClick={() => { setSelectedStudentId(student.id); setSearch('') }}><span className="avatar">{student.full_name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><span><strong>{student.full_name}</strong><small>{student.student_number} · {student.level} · {student.trade} {student.class_name}</small></span></button>)}{!filteredStudents.length && <p>No matching students.</p>}</div>}</div>
-            <button className="icon-button notification-button" aria-label={pendingAccountRequests ? `${pendingAccountRequests} account requests need review` : 'Notifications'} onClick={() => { if (user?.role === 'Administrator') setPage('Account Requests') }}><Bell size={18} />{user?.role === 'Administrator' && pendingAccountRequests > 0 && <i />}</button>
+            {user?.role === 'Administrator' && <button className="icon-button notification-button" aria-label={pendingAccountRequests ? `${pendingAccountRequests} account requests need review` : 'Notifications'} onClick={() => setPage('Account Requests')}><Bell size={18} />{pendingAccountRequests > 0 && <i />}</button>}
             <div className="top-user-wrap">
               <button className="top-user" aria-haspopup="menu" aria-expanded={topUserOpen} onClick={() => setTopUserOpen((open) => !open)}>
                 <div className="avatar">{user?.name?.[0] || 'P'}</div><span>{user?.name || 'Patron'}<small>{user?.role || 'Staff'}</small></span><ChevronDown size={15} />
@@ -306,7 +311,7 @@ function App() {
               {topUserOpen && <div className="top-user-menu" role="menu">
                 <strong>{user?.role === 'Administrator' ? 'School Administrator' : user?.role === 'Matron' ? 'School Matron' : user?.role}</strong>
                 <small>{user?.username}</small>
-                <button role="menuitem" onClick={() => { setPage('Settings'); setTopUserOpen(false) }}><Settings size={15} />Settings</button>
+                {user?.role !== 'Patron' && <button role="menuitem" onClick={() => { setPage('Settings'); setTopUserOpen(false) }}><Settings size={15} />Settings</button>}
                 <button role="menuitem" onClick={logout}><LogOut size={15} />Log out</button>
               </div>}
             </div>
@@ -399,7 +404,7 @@ function WelcomePage({ onSignIn, isAuthenticated = false, onPortalReturn }) {
   }
   return <main className="public-site">
     <header className="public-header">
-      <a className="public-brand" href="#/home" aria-label="ESTG TSS home"><span><img src="/images/estg-logo.svg" alt="" /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a>
+      <a className="public-brand" href="#/home" aria-label="ESTG TSS home"><span><img src="/icons/etg-tss-192.png" alt="" /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a>
       <button className="public-menu-toggle" aria-label={mobileOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}><Menu size={21} /></button>
       <nav className={mobileOpen ? 'public-nav open' : 'public-nav'} aria-label="School website navigation">
         {links.map(([label, id]) => <a key={id} className={page === id ? 'active' : ''} href={`#/${id}`}>{label}</a>)}
@@ -475,7 +480,7 @@ function WelcomePage({ onSignIn, isAuthenticated = false, onPortalReturn }) {
     </section> : null}
     <section className="public-bottom-cta"><div><span>ESTG TSS · GISENYI</span><h2>Come curious. Leave capable.</h2><p>Explore our technical trades and take the next step in your learning journey.</p></div><a href="#/trades">Explore the trades <ArrowUpRight size={16} /></a></section>
     <footer className="public-footer">
-      <div className="public-footer-main"><a className="public-brand footer-brand" href="#/home"><span><img src="/images/estg-logo.svg" alt="" /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a><p>Practical learning. Creative thinking.<br />A future built together.</p>      <div className="public-footer-social"><a href="https://www.instagram.com/" aria-label="Instagram" target="_blank" rel="noreferrer"><InstagramMark /></a><a href="https://x.com/" aria-label="X" target="_blank" rel="noreferrer"><span className="social-x-mark">𝕏</span></a></div></div>
+      <div className="public-footer-main"><a className="public-brand footer-brand" href="#/home"><span><img src="/icons/etg-tss-192.png" alt="" /></span><strong>ESTG TSS<small>Ecole secondaire Technique de Gisenyi</small></strong></a><p>Practical learning. Creative thinking.<br />A future built together.</p>      <div className="public-footer-social"><a href="https://www.instagram.com/" aria-label="Instagram" target="_blank" rel="noreferrer"><InstagramMark /></a><a href="https://x.com/" aria-label="X" target="_blank" rel="noreferrer"><span className="social-x-mark">𝕏</span></a></div></div>
       <div className="public-footer-col"><strong>Discover</strong><a href="#/about">About us</a><a href="#/trades">Our trades</a><a href="#/news">School news</a><a href="#/gallery">Gallery</a></div>
       <div className="public-footer-col"><strong>School life</strong><a href="#/student-life">Student life, clubs & events</a><a href="#/contact">Contact us</a></div>
       <div className="public-footer-col"><strong>Connect</strong><span><MapPin size={14} />Gisenyi, Rwanda</span><button onClick={isAuthenticated ? onPortalReturn : onSignIn}>{isAuthenticated ? 'Return to portal' : 'Staff & student portal'} <ArrowUpRight size={14} /></button><a href="#/contact">Send the school a message</a></div>
@@ -547,7 +552,7 @@ function Login({ onLogin, onBack, language, onLanguageChange }) {
       <div className="login-card">
         <label className="login-language-picker">Language<select value={language} onChange={(event) => onLanguageChange(event.target.value)}><option value="en">English</option><option value="rw">Kinyarwanda</option><option value="fr">Français</option></select></label>
         <button className="text-button login-home-link" onClick={onBack}><ChevronLeft size={15} />Back to school home</button>
-        <div className="login-logo"><img src="/images/estg-logo.svg" alt="ESTG TSS" /></div>
+        <div className="login-logo"><img src="/icons/etg-tss-192.png" alt="ESTG TSS" /></div>
         <p className="eyebrow">ESTG TSS · SCHOOL PATRON</p>
         <h1>{!isSignup ? translate(language, 'Welcome back') : `Request a ${mode === 'student' ? 'student' : mode === 'teacher' ? 'teacher' : 'class monitor'} account`}</h1>
         <p className="login-subtitle">{!isSignup ? 'Sign in to access your school account.' : 'The administrator must approve your request before you can sign in.'}</p>

@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['favicon.svg', 'icons/etg-tss-192.png'],
+      includeAssets: ['icons/etg-tss-192.png'],
       manifest: {
         id: '/',
         name: 'ESTG TSS',

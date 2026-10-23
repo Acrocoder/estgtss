@@ -409,7 +409,7 @@ async function initializeDatabase() {
     }
   }
   for (const account of [
-    { username: process.env.PATRON_USERNAME || 'estgpatron@gmail.com', password: process.env.PATRON_PASSWORD, name: process.env.PATRON_NAME, role: 'Patron' },
+    { username: process.env.PATRON_USERNAME || 'estg@gmail.com', password: process.env.PATRON_PASSWORD, name: process.env.PATRON_NAME || 'School Patron', role: 'Patron' },
     { username: process.env.MATRON_USERNAME || 'estgmatron@gmail.com', password: process.env.MATRON_PASSWORD, name: process.env.MATRON_NAME, role: 'Matron' },
   ]) {
     if (!account.password) continue
